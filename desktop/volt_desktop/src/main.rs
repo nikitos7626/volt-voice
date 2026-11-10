@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use tao::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder},
-    platform::windows::WindowBuilderExtWindows,
+    platform::windows::{WindowBuilderExtWindows, WindowExtWindows},
     window::{Icon, WindowBuilder},
 };
 use wry::{PermissionResponse, WebViewBuilder};
@@ -28,7 +28,221 @@ enum UserEvent {
     EvalJs(String),
     ReloadFresh(String),
     RestartNewExe(PathBuf),
+    ToggleOverlay,
+    SyncOverlay(String),
 }
+
+#[cfg(windows)]
+#[repr(C)]
+struct WinMsg {
+    hwnd: isize,
+    message: u32,
+    _pad: u32,
+    w_param: usize,
+    l_param: isize,
+    time: u32,
+    pt_x: i32,
+    pt_y: i32,
+    _l_private: u32,
+}
+
+#[cfg(windows)]
+extern "system" {
+    fn RegisterHotKey(hWnd: isize, id: i32, fsModifiers: u32, vk: u32) -> i32;
+    fn UnregisterHotKey(hWnd: isize, id: i32) -> i32;
+    fn GetMessageW(lpMsg: *mut WinMsg, hWnd: isize, wMsgFilterMin: u32, wMsgFilterMax: u32) -> i32;
+    fn SetWindowLongPtrW(hWnd: isize, nIndex: i32, dwNewLong: isize) -> isize;
+    fn GetWindowLongPtrW(hWnd: isize, nIndex: i32) -> isize;
+}
+
+const OVERLAY_HTML: &str = r###"<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: transparent !important;
+      overflow: hidden;
+      user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .overlay-card {
+      background: rgba(8, 8, 12, 0.78);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      padding: 12px 14px;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+      transition: opacity 0.25s ease;
+      opacity: 0.95;
+    }
+    .overlay-card.idle {
+      opacity: 0.28;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 6px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #EBFB10;
+    }
+    .hotkey-badge {
+      font-size: 8.5px;
+      font-family: Consolas, monospace;
+      color: #9D9D9D;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .channel-name {
+      font-size: 10px;
+      color: #BABABA;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .users-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      max-height: 260px;
+      overflow: hidden;
+    }
+    .user-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 3px 4px;
+      border-radius: 12px;
+      transition: all 0.18s ease;
+    }
+    .avatar-wrap {
+      position: relative;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #121316;
+      border: 1.5px solid rgba(255, 255, 255, 0.16);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+      transition: all 0.18s ease;
+    }
+    .user-row.speaking .avatar-wrap {
+      border-color: #EBFB10 !important;
+      box-shadow: 0 0 14px rgba(235, 251, 16, 0.75) !important;
+      color: #EBFB10 !important;
+      background: #18190B !important;
+    }
+    .user-name {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #BABABA;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+    .user-row.speaking .user-name {
+      color: #FFFFFF;
+      font-weight: 700;
+    }
+    .eq-bars {
+      display: none;
+      align-items: flex-end;
+      gap: 1.5px;
+      height: 10px;
+    }
+    .user-row.speaking .eq-bars {
+      display: flex;
+    }
+    .bar {
+      width: 2px;
+      background: #EBFB10;
+      border-radius: 1px;
+      animation: barJump 0.35s infinite alternate ease-in-out;
+    }
+    .bar:nth-child(1) { height: 6px; animation-delay: 0.05s; }
+    .bar:nth-child(2) { height: 10px; animation-delay: 0.15s; }
+    .bar:nth-child(3) { height: 7px; animation-delay: 0.25s; }
+    @keyframes barJump {
+      0% { height: 3px; }
+      100% { height: 10px; }
+    }
+    .muted-icon {
+      font-size: 9px;
+      color: #ED4245;
+    }
+  </style>
+</head>
+<body>
+  <div class="overlay-card idle" id="overlayCard">
+    <div class="header">
+      <div class="brand">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="#EBFB10"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>ВОЛЬТ</span>
+      </div>
+      <span class="hotkey-badge">Shift + ~</span>
+    </div>
+    <div class="channel-name" id="chanName">⚡ Основной канал</div>
+    <div class="users-list" id="usersList"></div>
+  </div>
+  <script>
+    window.__voltOverlaySync = function(payload) {
+      if (!payload) return;
+      const card = document.getElementById('overlayCard');
+      const chan = document.getElementById('chanName');
+      const list = document.getElementById('usersList');
+      if (chan && payload.room) chan.textContent = payload.room;
+      if (!list) return;
+
+      const users = payload.users || [];
+      const anySpeaking = users.some(u => u.speaking);
+      if (card) {
+        card.classList.toggle('idle', !anySpeaking);
+      }
+
+      list.innerHTML = users.map(u => {
+        const initial = (u.name || '?').charAt(0).toUpperCase();
+        const speakingClass = u.speaking ? 'speaking' : '';
+        const botIcon = u.is_bot ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#EBFB10" stroke-width="2.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>' : initial;
+        return `
+          <div class="user-row ${speakingClass}">
+            <div class="avatar-wrap">${botIcon}</div>
+            <span class="user-name">${u.name}</span>
+            <div class="eq-bars">
+              <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+            </div>
+            ${u.muted ? '<span class="muted-icon">🔇</span>' : ''}
+          </div>
+        `;
+      }).join('');
+    };
+  </script>
+</body>
+</html>"###;
 
 fn normalize_server_url(raw: &str) -> Option<String> {
     let trimmed = raw.trim().trim_end_matches('/');
@@ -400,6 +614,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let window = builder.build(&event_loop)?;
 
+    // ==========================================
+    // 2. Gaming Overlay Window (Always-on-Top & Click-through)
+    // ==========================================
+    let overlay_builder = WindowBuilder::new()
+        .with_title("VOLT Overlay")
+        .with_inner_size(tao::dpi::LogicalSize::new(260.0, 340.0))
+        .with_position(tao::dpi::LogicalPosition::new(24.0, 24.0))
+        .with_decorations(false)
+        .with_always_on_top(true)
+        .with_transparent(true)
+        .with_resizable(false)
+        .with_visible(false);
+
+    let overlay_window = overlay_builder.build(&event_loop)?;
+
+    #[cfg(windows)]
+    unsafe {
+        let hwnd = overlay_window.hwnd() as isize;
+        let cur = GetWindowLongPtrW(hwnd, -20); // GWL_EXSTYLE
+        // WS_EX_TRANSPARENT (0x20) + WS_EX_LAYERED (0x80000) + WS_EX_TOOLWINDOW (0x80)
+        SetWindowLongPtrW(hwnd, -20, cur | 0x00000020 | 0x00080000 | 0x00000080);
+    }
+
+    let overlay_webview = WebViewBuilder::new()
+        .with_html(OVERLAY_HTML)
+        .with_background_color((0, 0, 0, 0))
+        .with_autoplay(true)
+        .build(&overlay_window)?;
+
+    // ==========================================
+    // 3. Global Hotkey Thread: Shift + ` (Tilde)
+    // ==========================================
+    let hotkey_proxy = proxy.clone();
+    std::thread::spawn(move || {
+        #[cfg(windows)]
+        unsafe {
+            // Register Shift + ` (VK_OEM_3 = 0xC0) thread-level hotkey
+            // MOD_SHIFT = 0x0004, MOD_NOREPEAT = 0x4000
+            let res = RegisterHotKey(0, 1001, 0x0004 | 0x4000, 0xC0);
+            if res != 0 {
+                let mut msg: WinMsg = std::mem::zeroed();
+                while GetMessageW(&mut msg, 0, 0, 0) > 0 {
+                    if msg.message == 0x0312 && msg.w_param == 1001 { // WM_HOTKEY
+                        let _ = hotkey_proxy.send_event(UserEvent::ToggleOverlay);
+                    }
+                }
+                UnregisterHotKey(0, 1001);
+            }
+        }
+    });
+
     let (hwid, dev_name) = compute_hardware_id();
     let init_script = format!(
         "window.__VOLT_DESKTOP__ = true; window.__VOLT_SUPPORTS_RELAUNCH__ = true; window.__VOLT_CLIENT_KIND__ = 'main'; window.__VOLT_EXE_VERSION__ = '{}'; window.__VOLT_EXE_SHA256__ = '{}'; window.__VOLT_HARDWARE_ID__ = '{}'; window.__VOLT_DEVICE_NAME__ = '{}';",
@@ -413,7 +678,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_autoplay(true)
         .with_clipboard(true)
         .with_permission_handler(|_| PermissionResponse::Allow)
-        .with_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 VoltDesktop/1.2")
+        .with_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 VoltDesktop/1.3")
         .with_initialization_script(&init_script)
         .with_ipc_handler(move |req| {
             let body = req.body().trim().to_string();
@@ -421,6 +686,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Ok(cur_exe) = std::env::current_exe() {
                     let _ = ipc_proxy.send_event(UserEvent::RestartNewExe(cur_exe));
                 }
+                return;
+            }
+            if body == "toggle_overlay" {
+                let _ = ipc_proxy.send_event(UserEvent::ToggleOverlay);
+                return;
+            }
+            if let Some(json) = body.strip_prefix("overlay_sync|") {
+                let _ = ipc_proxy.send_event(UserEvent::SyncOverlay(json.to_string()));
                 return;
             }
             if let Some(raw_url) = body.strip_prefix("set_server|") {
@@ -483,6 +756,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webview = wb.build(&window)?;
 
     let leave_server = Arc::clone(&active_server);
+    let mut overlay_is_visible = false;
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -517,6 +792,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 UserEvent::RestartNewExe(exe_path) => {
                     let _ = Command::new(&exe_path).spawn();
                     *control_flow = ControlFlow::Exit;
+                }
+                UserEvent::ToggleOverlay => {
+                    overlay_is_visible = !overlay_is_visible;
+                    overlay_window.set_visible(overlay_is_visible);
+                    if overlay_is_visible {
+                        overlay_window.set_always_on_top(true);
+                    }
+                    let toast = if overlay_is_visible {
+                        "window.showToast && window.showToast('🎮 Оверлей поверх игр: ВКЛ (Shift + ~)');"
+                    } else {
+                        "window.showToast && window.showToast('🎮 Оверлей поверх игр: ВЫКЛ (Shift + ~)');"
+                    };
+                    let _ = webview.evaluate_script(toast);
+                }
+                UserEvent::SyncOverlay(json) => {
+                    let script = format!("window.__voltOverlaySync && window.__voltOverlaySync({});", json);
+                    let _ = overlay_webview.evaluate_script(&script);
                 }
             },
             _ => {}

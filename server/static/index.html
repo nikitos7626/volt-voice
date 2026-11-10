@@ -2248,6 +2248,10 @@
         <span class="channel-tag" id="room-header-name">Лобби</span>
       </div>
       <div class="header-right" style="display:flex; align-items:center; gap:8px;">
+        <button type="button" class="btn-popout btn-check-update" id="btn-toggle-overlay" title="Включить или выключить оверлей поверх игр (горячая клавиша Shift + ~)" style="display:none;">
+          <span>🎮 ОВЕРЛЕЙ</span>
+          <span style="font-family:var(--font-mono); font-size:8.5px; color:var(--reactor-lime);">[Shift + ~]</span>
+        </button>
         <button type="button" class="btn-popout btn-check-update" id="btn-check-update" title="Проверить и установить обновления с сервера">
           <span id="update-btn-icon">↻</span>
           <span id="update-btn-text">ПРОВЕРИТЬ ОБНОВЛЕНИЯ</span>
@@ -2391,6 +2395,9 @@
             <span>VOLT MUSIC</span>
           </div>
           <div class="music-deck-actions">
+            <a href="/VOLT_MUSIC.exe" download="VOLT_MUSIC.exe" class="btn-popout" id="btn-dl-music-exe" style="height:28px; font-size:9.5px; padding:0 10px;" title="Скачать отдельное приложение VOLT_MUSIC.exe">
+              <span>⬇ ОТДЕЛЬНЫЙ .EXE</span>
+            </a>
             <button type="button" class="btn-change-name" id="btn-close-music-modal" style="height:28px; padding:0 12px; font-size:10px;">✕ ЗАКРЫТЬ</button>
           </div>
         </div>
@@ -3120,6 +3127,14 @@
             console.warn('Failed to parse chat message:', err);
           }
         })
+        .on(LivekitClient.RoomEvent.ActiveSpeakersChanged, (speakers) => {
+          const now = performance.now();
+          (speakers || []).forEach(s => {
+            if (s && s.identity) {
+              speakingHoldTimes.set(s.identity, now);
+            }
+          });
+        })
         .on(LivekitClient.RoomEvent.ParticipantDisconnected, (p) => {
           updateParticipants(room);
           showToast(`[ - ] ${p.name || p.identity} ВЫШЕЛ`);
@@ -3238,6 +3253,48 @@
       }
     }
 
+    let lastOverlaySyncTime = 0;
+    function broadcastOverlayState() {
+      if (!window.__VOLT_DESKTOP__ || !window.ipc || !currentRoom) return;
+      try {
+        const users = [];
+        if (currentRoom.localParticipant) {
+          const lp = currentRoom.localParticipant;
+          const isSpk = (performance.now() - (speakingHoldTimes.get(lp.identity) || 0) < 350);
+          users.push({
+            name: (lp.name || lp.identity || 'Вы').replace('(Вы)', '').trim(),
+            is_me: true,
+            speaking: isSpk && lp.isMicrophoneEnabled,
+            muted: !lp.isMicrophoneEnabled,
+            is_bot: false
+          });
+        }
+        currentRoom.remoteParticipants.forEach(rp => {
+          const isSpk = (performance.now() - (speakingHoldTimes.get(rp.identity) || 0) < 350);
+          const isMuted = !rp.audioTrackPublications.some(pub => pub.track && !pub.isMuted);
+          const isBot = (rp.name || rp.identity || '').includes('[MUSIC]') || (rp.name || rp.identity || '').includes('VOLT MUSIC');
+          users.push({
+            name: (rp.name || rp.identity || 'Собеседник').replace('[MUSIC]', '').replace('ПЛЕЕР', '').trim(),
+            is_me: false,
+            speaking: isSpk && !isMuted,
+            muted: isMuted,
+            is_bot: isBot
+          });
+        });
+        window.ipc.postMessage('overlay_sync|' + JSON.stringify({
+          room: currentRoom.name === 'lounge' ? '⚡ Основной канал' : currentRoom.name,
+          users: users
+        }));
+      } catch(e) {}
+    }
+
+    function clearOverlayState() {
+      if (!window.__VOLT_DESKTOP__ || !window.ipc) return;
+      try {
+        window.ipc.postMessage('overlay_sync|' + JSON.stringify({ room: '', users: [] }));
+      } catch(e) {}
+    }
+
     function startVisualizerLoop() {
       if (visualizerLoopRunning) return;
       visualizerLoopRunning = true;
@@ -3252,29 +3309,34 @@
           if (!currentRoom || !currentRoom.localParticipant) return;
           analyser.getByteFrequencyData(dataArray);
 
+          // Focus on lower vocal frequencies (80 Hz - 2500 Hz) where speech fundamentals live
           const v1 = dataArray[0] || 0;
-          const v2 = dataArray[2] || 0;
-          const v3 = dataArray[4] || 0;
-          const v4 = dataArray[6] || 0;
-          const avg = (v1 + v2 + v3 + v4) / 4;
+          const v2 = dataArray[1] || dataArray[2] || 0;
+          const v3 = dataArray[2] || dataArray[4] || 0;
+          const v4 = dataArray[3] || dataArray[6] || 0;
+          const maxVal = Math.max(v1, v2, v3, v4);
+          const avg = (v1 + v2) / 2;
 
           const isLocal = currentRoom && currentRoom.localParticipant && currentRoom.localParticipant.identity === identity;
           const isMuted = isLocal ? !currentRoom.localParticipant.isMicrophoneEnabled : false;
 
-          // Smooth Voice Activity Detection with 350ms hysteresis (no flickering between words)
+          // Dual-source voice detection: Web Audio frequency analysis OR server-side LiveKit isSpeaking
           const now = performance.now();
-          if (avg > 16 && !isMuted) {
+          const pObj = isLocal ? currentRoom.localParticipant : currentRoom.remoteParticipants.get(identity);
+          const serverSpeaking = pObj && (pObj.isSpeaking || (pObj.audioLevel && pObj.audioLevel > 0.02));
+
+          if ((maxVal > 10 || serverSpeaking) && !isMuted) {
             speakingHoldTimes.set(identity, now);
           }
           const lastActive = speakingHoldTimes.get(identity) || 0;
-          const isSpeaking = (now - lastActive < 350) && !isMuted;
+          const isSpeaking = (now - lastActive < 380) && !isMuted;
 
           // Drive particle constellation smoothly
           if (window.triggerParticleVoiceEnergy && isSpeaking) {
-            window.triggerParticleVoiceEnergy(avg);
+            window.triggerParticleVoiceEnergy(Math.max(avg, 25));
           }
           if (isLocal && micTestBar && !micTestActive) {
-            const pct = Math.min(100, Math.round((avg / 100) * 100));
+            const pct = Math.min(100, Math.round((Math.max(avg, maxVal) / 100) * 100));
             micTestBar.style.width = pct + '%';
             const lvl = document.getElementById('mic-test-level');
             if (lvl) lvl.textContent = pct + '%';
@@ -3290,10 +3352,14 @@
             const b4 = card.querySelector('.bar-4');
 
             if (!isMuted && isSpeaking) {
-              if (b1) b1.style.height = Math.min(10, Math.max(2.5, (v1 / 255) * 10)) + 'px';
-              if (b2) b2.style.height = Math.min(10, Math.max(2.5, (v2 / 255) * 10)) + 'px';
-              if (b3) b3.style.height = Math.min(10, Math.max(2.5, (v3 / 255) * 10)) + 'px';
-              if (b4) b4.style.height = Math.min(10, Math.max(2.5, (v4 / 255) * 10)) + 'px';
+              const h1 = Math.min(10, Math.max(4.5, (v1 / 255) * 10 || (Math.sin(now / 90) * 2 + 6)));
+              const h2 = Math.min(10, Math.max(5.5, (v2 / 255) * 10 || (Math.cos(now / 80) * 2.5 + 7)));
+              const h3 = Math.min(10, Math.max(4.5, (v3 / 255) * 10 || (Math.sin(now / 110) * 2 + 5.5)));
+              const h4 = Math.min(10, Math.max(5.0, (v4 / 255) * 10 || (Math.cos(now / 95) * 2 + 6.5)));
+              if (b1) b1.style.height = h1 + 'px';
+              if (b2) b2.style.height = h2 + 'px';
+              if (b3) b3.style.height = h3 + 'px';
+              if (b4) b4.style.height = h4 + 'px';
             } else {
               if (b1) b1.style.height = '2.5px';
               if (b2) b2.style.height = '2.5px';
@@ -3319,6 +3385,12 @@
             if (tag) tag.textContent = isMuted ? 'БЕЗ ЗВУКА' : (isSpeaking ? 'ГОВОРИТ' : 'ВКЛ');
           }
         });
+
+        // 3. Broadcast overlay status every ~80ms in desktop app
+        if (window.__VOLT_DESKTOP__ && window.ipc && (now - lastOverlaySyncTime > 80)) {
+          lastOverlaySyncTime = now;
+          broadcastOverlayState();
+        }
 
         requestAnimationFrame(renderFrame);
       }
@@ -3363,10 +3435,8 @@
       const pVol = getParticipantVolume(identity) / 100;
       const mVol = getMasterOutputVolume() / 100;
       try {
-        track.setVolume(Math.max(0, Math.min(4.0, pVol * mVol)));
-      } catch(e) {
-        try { track.setVolume(Math.max(0, Math.min(1.0, pVol * mVol))); } catch(_){}
-      }
+        track.setVolume(Math.max(0, Math.min(1.0, pVol * mVol)));
+      } catch(e) {}
     }
 
     function applyAllRemoteVolumes() {
@@ -4536,6 +4606,16 @@
       });
 
       // Auto-Update Checker & Native Self-Updater
+      const btnToggleOverlay = document.getElementById('btn-toggle-overlay');
+      if (btnToggleOverlay) {
+        if (window.__VOLT_DESKTOP__) {
+          btnToggleOverlay.style.display = 'inline-flex';
+        }
+        btnToggleOverlay.addEventListener('click', () => {
+          if (window.ipc) window.ipc.postMessage('toggle_overlay');
+        });
+      }
+
       const btnCheckUpdate = document.getElementById('btn-check-update');
       const updateBtnIcon = document.getElementById('update-btn-icon');
       const updateBtnText = document.getElementById('update-btn-text');

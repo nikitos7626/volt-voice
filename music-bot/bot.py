@@ -99,10 +99,17 @@ class AudioEngine:
         treble = float(cfg.get("treble_db", 2.0))
         width = float(cfg.get("stereo_width", 1.12))
 
-        if preset == "flat" and abs(bass) < 0.05 and abs(treble) < 0.05 and abs(width - 1.0) < 0.02:
-            return f"aresample=48000:resampler=soxr:precision=28,volume={vol:.2f}"
+        # Standard broadcast voice-matching target (-13.0 dB):
+        # Commercial music peaks at 0 dBFS (-10 to -14 LUFS), while human headset mics in WebRTC
+        # output speech around -26 to -30 dBFS. This attenuation ensures music at 100% volume
+        # sits at a natural, balanced conversational level alongside human speech.
+        VOICE_MATCH_ATTENUATION_DB = -13.0
 
-        headroom = -2.5 if bass > 2.5 else -1.0
+        if preset == "flat" and abs(bass) < 0.05 and abs(treble) < 0.05 and abs(width - 1.0) < 0.02:
+            base_vol = vol * (10 ** (VOICE_MATCH_ATTENUATION_DB / 20.0))
+            return f"aresample=48000:resampler=soxr:precision=28,volume={base_vol:.3f}"
+
+        headroom = (-2.5 if bass > 2.5 else -1.0) + VOICE_MATCH_ATTENUATION_DB
         vol_db_factor = vol * (10 ** (headroom / 20.0))
         punch_db = round(bass * 0.55, 2)
         return (
