@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use tao::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder},
-    platform::windows::{WindowBuilderExtWindows, WindowExtWindows},
+    platform::windows::WindowBuilderExtWindows,
     window::{Icon, WindowBuilder},
 };
 use wry::{PermissionResponse, WebViewBuilder};
@@ -28,217 +28,7 @@ enum UserEvent {
     EvalJs(String),
     ReloadFresh(String),
     RestartNewExe(PathBuf),
-    ToggleOverlay,
-    SyncOverlay(String),
 }
-
-#[cfg(windows)]
-#[repr(C)]
-struct WinMsg {
-    hwnd: isize,
-    message: u32,
-    _pad: u32,
-    w_param: usize,
-    l_param: isize,
-    time: u32,
-    pt_x: i32,
-    pt_y: i32,
-    _l_private: u32,
-}
-
-#[cfg(windows)]
-#[repr(C)]
-struct MARGINS {
-    cxLeftWidth: i32,
-    cxRightWidth: i32,
-    cyTopHeight: i32,
-    cyBottomHeight: i32,
-}
-
-extern "system" {
-    fn DwmExtendFrameIntoClientArea(hWnd: isize, pMarInset: *const MARGINS) -> i32;
-    fn RegisterHotKey(hWnd: isize, id: i32, fsModifiers: u32, vk: u32) -> i32;
-    fn UnregisterHotKey(hWnd: isize, id: i32) -> i32;
-    fn GetMessageW(lpMsg: *mut WinMsg, hWnd: isize, wMsgFilterMin: u32, wMsgFilterMax: u32) -> i32;
-    fn SetWindowLongPtrW(hWnd: isize, nIndex: i32, dwNewLong: isize) -> isize;
-    fn GetWindowLongPtrW(hWnd: isize, nIndex: i32) -> isize;
-}
-
-const OVERLAY_HTML: &str = r###"<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      width: 100%;
-      height: 100%;
-      background: transparent !important;
-      background-color: transparent !important;
-      overflow: hidden;
-      user-select: none;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    }
-    #widget {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 10px;
-      padding: 10px;
-    }
-    #usersList {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 10px;
-      width: 100%;
-    }
-    .user-entry {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      transition: transform 0.12s ease;
-    }
-    .user-entry.speaking {
-      transform: translateX(4px);
-    }
-    .avatar-frame {
-      position: relative;
-      width: 42px;
-      height: 42px;
-      border-radius: 50%;
-      background: #1e1f24;
-      border: 2px solid transparent;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #FFFFFF;
-      font-size: 15px;
-      font-weight: 700;
-      flex-shrink: 0;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
-      transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    }
-    .user-entry.speaking .avatar-frame {
-      border-color: #EBFB10 !important;
-      box-shadow: 0 0 18px rgba(235, 251, 16, 0.9), 0 4px 14px rgba(0, 0, 0, 0.7) !important;
-      background: #1b1c0e !important;
-      color: #EBFB10 !important;
-    }
-    .name-bubble {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(18, 19, 23, 0.88);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 999px;
-      padding: 6px 14px;
-      color: #dcddde;
-      font-size: 13px;
-      font-weight: 600;
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
-      max-width: 190px;
-      transition: all 0.15s ease;
-    }
-    .user-entry.speaking .name-bubble {
-      color: #FFFFFF !important;
-      background: rgba(24, 25, 30, 0.96) !important;
-      border-color: rgba(235, 251, 16, 0.4) !important;
-    }
-    .name-text {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .mic-off-icon {
-      font-size: 11px;
-      color: #ED4245;
-      margin-left: 2px;
-    }
-    .bot-pill {
-      font-size: 8.5px;
-      font-weight: 800;
-      padding: 1px 5px;
-      border-radius: 4px;
-      background: rgba(235, 251, 16, 0.16);
-      color: #EBFB10;
-      border: 1px solid rgba(235, 251, 16, 0.35);
-      letter-spacing: 0.04em;
-    }
-    .bottom-bar {
-      margin-top: 4px;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(14, 15, 18, 0.88);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 999px;
-      padding: 5px 12px;
-      color: #9D9D9D;
-      font-size: 11px;
-      font-weight: 700;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-    }
-    .bottom-bar .bolt { color: #EBFB10; font-size: 12px; }
-    .bottom-bar .hotkey { color: #65656d; font-family: Consolas, monospace; font-size: 9px; }
-  </style>
-</head>
-<body>
-  <div id="widget">
-    <div id="usersList">
-      <div class="user-entry">
-        <div class="avatar-frame">⚡</div>
-        <div class="name-bubble"><span class="name-text">Ожидание...</span></div>
-      </div>
-    </div>
-    <div class="bottom-bar" id="bottomBar">
-      <span class="bolt">⚡</span>
-      <span id="channelLabel">Основной канал</span>
-      <span class="hotkey">Shift + ~</span>
-    </div>
-  </div>
-  <script>
-    window.__voltOverlaySync = function(payload) {
-      if (!payload) return;
-      const chan = document.getElementById('channelLabel');
-      const list = document.getElementById('usersList');
-      if (chan && payload.room) chan.textContent = payload.room.replace('⚡', '').trim();
-      if (!list) return;
-
-      const users = payload.users || [];
-      if (users.length === 0) {
-        list.innerHTML = `
-          <div class="user-entry">
-            <div class="avatar-frame">⚡</div>
-            <div class="name-bubble"><span class="name-text">Ожидание...</span></div>
-          </div>
-        `;
-        return;
-      }
-
-      list.innerHTML = users.map(u => {
-        const initial = (u.name || '?').charAt(0).toUpperCase();
-        const speakingClass = u.speaking ? 'speaking' : '';
-        const botIcon = u.is_bot ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EBFB10" stroke-width="2.2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>' : initial;
-        return `
-          <div class="user-entry ${speakingClass}">
-            <div class="avatar-frame">${botIcon}</div>
-            <div class="name-bubble">
-              <span class="name-text">${u.name}</span>
-              ${u.is_bot ? '<span class="bot-pill">ПЛЕЕР</span>' : ''}
-              ${u.muted ? '<span class="mic-off-icon">🔇</span>' : ''}
-            </div>
-          </div>
-        `;
-      }).join('');
-    };
-  </script>
-</body>
-</html>"###;
 
 fn normalize_server_url(raw: &str) -> Option<String> {
     let trimmed = raw.trim().trim_end_matches('/');
@@ -610,63 +400,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let window = builder.build(&event_loop)?;
 
-    // ==========================================
-    // 2. Gaming Overlay Window (Always-on-Top & Click-through)
-    // ==========================================
-    let overlay_builder = WindowBuilder::new()
-        .with_title("VOLT Overlay")
-        .with_inner_size(tao::dpi::LogicalSize::new(260.0, 340.0))
-        .with_position(tao::dpi::LogicalPosition::new(24.0, 24.0))
-        .with_decorations(false)
-        .with_always_on_top(true)
-        .with_transparent(true)
-        .with_background_color((0, 0, 0, 0))
-        .with_resizable(false)
-        .with_visible(false);
-
-    let overlay_window = overlay_builder.build(&event_loop)?;
-
-    #[cfg(windows)]
-    unsafe {
-        let hwnd = overlay_window.hwnd() as isize;
-        let cur = GetWindowLongPtrW(hwnd, -20); // GWL_EXSTYLE
-        // WS_EX_TRANSPARENT (0x20) + WS_EX_LAYERED (0x80000) + WS_EX_TOOLWINDOW (0x80)
-        let m = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
-        let _ = DwmExtendFrameIntoClientArea(hwnd, &m);
-        SetWindowLongPtrW(hwnd, -20, cur | 0x00000020 | 0x00000080);
-    }
-
-    let overlay_webview = WebViewBuilder::new()
-        .with_html(OVERLAY_HTML)
-        .with_background_color((0, 0, 0, 0))
-        .with_autoplay(true)
-        .build(&overlay_window)?;
-
-    // ==========================================
-    // 3. Global Hotkey Thread: Shift + ` (Tilde)
-    // ==========================================
-    let hotkey_proxy = proxy.clone();
-    std::thread::spawn(move || {
-        #[cfg(windows)]
-        unsafe {
-            // Register Shift + ` (VK_OEM_3 = 0xC0) thread-level hotkey
-            // MOD_SHIFT = 0x0004, MOD_NOREPEAT = 0x4000
-            let res = RegisterHotKey(0, 1001, 0x0004 | 0x4000, 0xC0);
-            if res != 0 {
-                let mut msg: WinMsg = std::mem::zeroed();
-                while GetMessageW(&mut msg, 0, 0, 0) > 0 {
-                    if msg.message == 0x0312 && msg.w_param == 1001 { // WM_HOTKEY
-                        let _ = hotkey_proxy.send_event(UserEvent::ToggleOverlay);
-                    }
-                }
-                UnregisterHotKey(0, 1001);
-            }
-        }
-    });
-
     let (hwid, dev_name) = compute_hardware_id();
     let init_script = format!(
-        "window.__VOLT_DESKTOP__ = true; window.__VOLT_SUPPORTS_RELAUNCH__ = true; window.__VOLT_CLIENT_KIND__ = 'main'; window.__VOLT_EXE_VERSION__ = '{}'; window.__VOLT_EXE_SHA256__ = '{}'; window.__VOLT_HARDWARE_ID__ = '{}'; window.__VOLT_DEVICE_NAME__ = '{}'; if (!window.ipc && window.chrome && window.chrome.webview) {{ window.ipc = {{ postMessage: function(msg) {{ window.chrome.webview.postMessage(msg); }} }}; }}",
+        "window.__VOLT_DESKTOP__ = true; window.__VOLT_SUPPORTS_RELAUNCH__ = true; window.__VOLT_CLIENT_KIND__ = 'main'; window.__VOLT_EXE_VERSION__ = '{}'; window.__VOLT_EXE_SHA256__ = '{}'; window.__VOLT_HARDWARE_ID__ = '{}'; window.__VOLT_DEVICE_NAME__ = '{}';",
         APP_VERSION, local_sha, hwid, js_escape(&dev_name)
     );
 
@@ -677,7 +413,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_autoplay(true)
         .with_clipboard(true)
         .with_permission_handler(|_| PermissionResponse::Allow)
-        .with_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 VoltDesktop/1.3")
+        .with_user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 VoltDesktop/1.2")
         .with_initialization_script(&init_script)
         .with_ipc_handler(move |req| {
             let body = req.body().trim().to_string();
@@ -685,14 +421,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Ok(cur_exe) = std::env::current_exe() {
                     let _ = ipc_proxy.send_event(UserEvent::RestartNewExe(cur_exe));
                 }
-                return;
-            }
-            if body == "toggle_overlay" {
-                let _ = ipc_proxy.send_event(UserEvent::ToggleOverlay);
-                return;
-            }
-            if let Some(json) = body.strip_prefix("overlay_sync|") {
-                let _ = ipc_proxy.send_event(UserEvent::SyncOverlay(json.to_string()));
                 return;
             }
             if let Some(raw_url) = body.strip_prefix("set_server|") {
@@ -755,8 +483,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webview = wb.build(&window)?;
 
     let leave_server = Arc::clone(&active_server);
-    let mut overlay_is_visible = false;
-
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -791,24 +517,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 UserEvent::RestartNewExe(exe_path) => {
                     let _ = Command::new(&exe_path).spawn();
                     *control_flow = ControlFlow::Exit;
-                }
-                UserEvent::ToggleOverlay => {
-                    overlay_is_visible = !overlay_is_visible;
-                    overlay_window.set_visible(overlay_is_visible);
-                    if overlay_is_visible {
-                        overlay_window.set_always_on_top(true);
-                        let _ = webview.evaluate_script("if (typeof broadcastOverlayState === 'function') broadcastOverlayState();");
-                    }
-                    let toast = if overlay_is_visible {
-                        "window.showToast && window.showToast('🎮 Оверлей поверх игр: ВКЛ (Shift + ~)');"
-                    } else {
-                        "window.showToast && window.showToast('🎮 Оверлей поверх игр: ВЫКЛ (Shift + ~)');"
-                    };
-                    let _ = webview.evaluate_script(toast);
-                }
-                UserEvent::SyncOverlay(json) => {
-                    let script = format!("window.__voltOverlaySync && window.__voltOverlaySync({});", json);
-                    let _ = overlay_webview.evaluate_script(&script);
                 }
             },
             _ => {}

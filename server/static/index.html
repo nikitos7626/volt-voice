@@ -2248,10 +2248,6 @@
         <span class="channel-tag" id="room-header-name">Лобби</span>
       </div>
       <div class="header-right" style="display:flex; align-items:center; gap:8px;">
-        <button type="button" class="btn-popout btn-check-update" id="btn-toggle-overlay" title="Включить или выключить оверлей поверх игр (горячая клавиша Shift + ~)" style="display:none;">
-          <span>🎮 ОВЕРЛЕЙ</span>
-          <span style="font-family:var(--font-mono); font-size:8.5px; color:var(--reactor-lime);">[Shift + ~]</span>
-        </button>
         <button type="button" class="btn-popout btn-check-update" id="btn-check-update" title="Проверить и установить обновления с сервера">
           <span id="update-btn-icon">↻</span>
           <span id="update-btn-text">ПРОВЕРИТЬ ОБНОВЛЕНИЯ</span>
@@ -3135,7 +3131,6 @@
               speakingHoldTimes.set(s.identity, now);
             }
           });
-          broadcastOverlayState();
         })
         .on(LivekitClient.RoomEvent.ParticipantDisconnected, (p) => {
           updateParticipants(room);
@@ -3269,57 +3264,6 @@
       return false;
     }
 
-    let lastOverlaySyncTime = 0;
-    function broadcastOverlayState() {
-      if (!window.__VOLT_DESKTOP__ || !currentRoom) return;
-      try {
-        const users = [];
-        if (currentRoom.localParticipant) {
-          const lp = currentRoom.localParticipant;
-          const isSpk = (performance.now() - (speakingHoldTimes.get(lp.identity) || 0) < 400);
-          users.push({
-            name: (lp.name || lp.identity || 'Вы').replace('(Вы)', '').trim(),
-            is_me: true,
-            speaking: isSpk && lp.isMicrophoneEnabled,
-            muted: !lp.isMicrophoneEnabled,
-            is_bot: false
-          });
-        }
-        currentRoom.remoteParticipants.forEach(rp => {
-          const isSpk = (performance.now() - (speakingHoldTimes.get(rp.identity) || 0) < 400);
-          const isMuted = !rp.audioTrackPublications.some(pub => pub.track && !pub.isMuted);
-          const isBot = (rp.name || rp.identity || '').includes('[MUSIC]') || (rp.name || rp.identity || '').includes('VOLT MUSIC');
-          users.push({
-            name: (rp.name || rp.identity || 'Собеседник').replace('[MUSIC]', '').replace('ПЛЕЕР', '').trim(),
-            is_me: false,
-            speaking: isSpk && !isMuted,
-            muted: isMuted,
-            is_bot: isBot
-          });
-        });
-        postDesktopIpc('overlay_sync|' + JSON.stringify({
-          room: currentRoom.name === 'lounge' ? '⚡ Основной канал' : currentRoom.name,
-          users: users
-        }));
-      } catch(e) {}
-    }
-    window.broadcastOverlayState = broadcastOverlayState;
-
-    function clearOverlayState() {
-      if (!window.__VOLT_DESKTOP__) return;
-      try {
-        postDesktopIpc('overlay_sync|' + JSON.stringify({ room: '', users: [] }));
-      } catch(e) {}
-    }
-    window.clearOverlayState = clearOverlayState;
-
-    // Background overlay broadcaster: runs on timer so it NEVER pauses when games have full focus
-    setInterval(() => {
-      if (window.__VOLT_DESKTOP__ && currentRoom) {
-        broadcastOverlayState();
-      }
-    }, 80);
-
     function startVisualizerLoop() {
       if (visualizerLoopRunning) return;
       visualizerLoopRunning = true;
@@ -3416,12 +3360,6 @@
             if (tag) tag.textContent = isMuted ? 'БЕЗ ЗВУКА' : (isSpeaking ? 'ГОВОРИТ' : 'ВКЛ');
           }
         });
-
-        // 3. Broadcast overlay status every ~80ms in desktop app
-        if (window.__VOLT_DESKTOP__ && (now - lastOverlaySyncTime > 80)) {
-          lastOverlaySyncTime = now;
-          broadcastOverlayState();
-        }
 
         requestAnimationFrame(renderFrame);
       }
@@ -3652,7 +3590,6 @@
         });
       }
       startVisualizerLoop();
-      broadcastOverlayState();
     }
 
     const activeStreams = new Map(); // identity -> { track, participant, name }
@@ -4644,17 +4581,6 @@
           } catch(e){}
         }
       });
-
-      // Auto-Update Checker & Native Self-Updater
-      const btnToggleOverlay = document.getElementById('btn-toggle-overlay');
-      if (btnToggleOverlay) {
-        if (window.__VOLT_DESKTOP__) {
-          btnToggleOverlay.style.display = 'inline-flex';
-        }
-        btnToggleOverlay.addEventListener('click', () => {
-          postDesktopIpc('toggle_overlay');
-        });
-      }
 
       const btnCheckUpdate = document.getElementById('btn-check-update');
       const updateBtnIcon = document.getElementById('update-btn-icon');
