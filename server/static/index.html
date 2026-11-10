@@ -2967,6 +2967,7 @@
 
         // Render participant cards immediately upon WebRTC connection so UI is never blank
         updateParticipants(currentRoom);
+        startVisualizerLoop();
         updateChannelCardUI();
         showToast(`[ + ] ПОДКЛЮЧЕНО`);
         playUserJoinSound();
@@ -3141,7 +3142,7 @@
           playUserLeaveSound();
         })
         .on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
-          if (track.kind === 'video' || publication.source === LivekitClient.Track.Source.ScreenShare) {
+          if (track.kind === 'video') {
             registerStream(track, participant);
           } else if (track.kind === 'audio') {
             track.attach();
@@ -3152,7 +3153,7 @@
           }
         })
         .on(LivekitClient.RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
-          if (publication.source === LivekitClient.Track.Source.ScreenShare || track.kind === 'video') {
+          if (track.kind === 'video') {
             unregisterStream(participant.identity);
           } else if (track.kind === 'audio') {
             unhookAudioAnalyser(participant.identity);
@@ -3305,31 +3306,37 @@
           return;
         }
 
-        audioAnalysers.forEach(({ analyser, dataArray }, identity) => {
-          if (!currentRoom || !currentRoom.localParticipant) return;
-          analyser.getByteFrequencyData(dataArray);
+        const now = performance.now();
+        const allParticipants = [];
+        if (currentRoom.localParticipant) allParticipants.push(currentRoom.localParticipant);
+        currentRoom.remoteParticipants.forEach(p => allParticipants.push(p));
 
-          // Focus on lower vocal frequencies (80 Hz - 2500 Hz) where speech fundamentals live
-          const v1 = dataArray[0] || 0;
-          const v2 = dataArray[1] || dataArray[2] || 0;
-          const v3 = dataArray[2] || dataArray[4] || 0;
-          const v4 = dataArray[3] || dataArray[6] || 0;
-          const maxVal = Math.max(v1, v2, v3, v4);
-          const avg = (v1 + v2) / 2;
-
-          const isLocal = currentRoom && currentRoom.localParticipant && currentRoom.localParticipant.identity === identity;
+        allParticipants.forEach(p => {
+          const identity = p.identity;
+          const isLocal = p === currentRoom.localParticipant;
           const isMuted = isLocal ? !currentRoom.localParticipant.isMicrophoneEnabled : false;
 
-          // Dual-source voice detection: Web Audio frequency analysis OR server-side LiveKit isSpeaking
-          const now = performance.now();
-          const pObj = isLocal ? currentRoom.localParticipant : currentRoom.remoteParticipants.get(identity);
-          const serverSpeaking = pObj && (pObj.isSpeaking || (pObj.audioLevel && pObj.audioLevel > 0.02));
+          let v1 = 0, v2 = 0, v3 = 0, v4 = 0, avg = 0, maxVal = 0;
+          const analyserEntry = audioAnalysers.get(identity);
+          if (analyserEntry) {
+            const { analyser, dataArray } = analyserEntry;
+            analyser.getByteFrequencyData(dataArray);
+            v1 = dataArray[0] || 0;
+            v2 = dataArray[1] || dataArray[2] || 0;
+            v3 = dataArray[2] || dataArray[4] || 0;
+            v4 = dataArray[3] || dataArray[6] || 0;
+            maxVal = Math.max(v1, v2, v3, v4);
+            avg = (v1 + v2 + v3 + v4) / 4;
+          }
 
-          if ((maxVal > 10 || serverSpeaking) && !isMuted) {
+          // Dual-source voice detection: Web Audio frequency analysis OR server-side LiveKit isSpeaking
+          const serverSpeaking = Boolean(p.isSpeaking || (p.audioLevel && p.audioLevel > 0.015));
+
+          if ((maxVal > 8 || serverSpeaking) && !isMuted) {
             speakingHoldTimes.set(identity, now);
           }
           const lastActive = speakingHoldTimes.get(identity) || 0;
-          const isSpeaking = (now - lastActive < 380) && !isMuted;
+          const isSpeaking = (now - lastActive < 400) && !isMuted;
 
           // Drive particle constellation smoothly
           if (window.triggerParticleVoiceEnergy && isSpeaking) {
@@ -3352,10 +3359,10 @@
             const b4 = card.querySelector('.bar-4');
 
             if (!isMuted && isSpeaking) {
-              const h1 = Math.min(10, Math.max(4.5, (v1 / 255) * 10 || (Math.sin(now / 90) * 2 + 6)));
-              const h2 = Math.min(10, Math.max(5.5, (v2 / 255) * 10 || (Math.cos(now / 80) * 2.5 + 7)));
-              const h3 = Math.min(10, Math.max(4.5, (v3 / 255) * 10 || (Math.sin(now / 110) * 2 + 5.5)));
-              const h4 = Math.min(10, Math.max(5.0, (v4 / 255) * 10 || (Math.cos(now / 95) * 2 + 6.5)));
+              const h1 = Math.min(10, Math.max(4.0, (v1 / 255) * 10 || (Math.sin(now / 85) * 2.5 + 6.5)));
+              const h2 = Math.min(10, Math.max(5.0, (v2 / 255) * 10 || (Math.cos(now / 75) * 3.0 + 7.0)));
+              const h3 = Math.min(10, Math.max(4.0, (v3 / 255) * 10 || (Math.sin(now / 105) * 2.5 + 6.0)));
+              const h4 = Math.min(10, Math.max(4.5, (v4 / 255) * 10 || (Math.cos(now / 90) * 2.5 + 6.5)));
               if (b1) b1.style.height = h1 + 'px';
               if (b2) b2.style.height = h2 + 'px';
               if (b3) b3.style.height = h3 + 'px';
@@ -3456,6 +3463,13 @@
         const saved = localStorage.getItem(`volt_vol_${identity}`);
         if (saved) {
           const parsed = parseInt(saved, 10);
+          const isBot = identity.includes('[MUSIC]') || identity.includes('[BOT]') || identity.includes('VOLT MUSIC');
+          if (isBot && parsed < 30 && !localStorage.getItem('volt_vol_music_v3_balanced')) {
+            localStorage.setItem('volt_vol_music_v3_balanced', 'true');
+            localStorage.setItem(`volt_vol_${identity}`, 100);
+            participantVolumes.set(identity, 100);
+            return 100;
+          }
           participantVolumes.set(identity, parsed);
           return parsed;
         }
@@ -3613,6 +3627,7 @@
           duration: 550
         });
       }
+      startVisualizerLoop();
     }
 
     const activeStreams = new Map(); // identity -> { track, participant, name }

@@ -103,7 +103,7 @@ class AudioEngine:
         # Commercial music peaks at 0 dBFS (-10 to -14 LUFS), while human headset mics in WebRTC
         # output speech around -26 to -30 dBFS. This attenuation ensures music at 100% volume
         # sits at a natural, balanced conversational level alongside human speech.
-        VOICE_MATCH_ATTENUATION_DB = -13.0
+        VOICE_MATCH_ATTENUATION_DB = -18.5
 
         if preset == "flat" and abs(bass) < 0.05 and abs(treble) < 0.05 and abs(width - 1.0) < 0.02:
             base_vol = vol * (10 ** (VOICE_MATCH_ATTENUATION_DB / 20.0))
