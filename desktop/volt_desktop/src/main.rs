@@ -214,7 +214,12 @@ const OVERLAY_HTML: &str = r###"<!DOCTYPE html>
       <span id="hudChannel">VOLT</span>
       <span class="hotkey">Shift + ~</span>
     </div>
-    <div class="users-container" id="usersContainer"></div>
+    <div class="users-container" id="usersContainer">
+      <div class="user-pill" style="opacity:0.65;">
+        <div class="avatar-circle">⚡</div>
+        <span class="user-label">Основной канал</span>
+      </div>
+    </div>
   </div>
   <script>
     window.__voltOverlaySync = function(payload) {
@@ -807,6 +812,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     overlay_window.set_visible(overlay_is_visible);
                     if overlay_is_visible {
                         overlay_window.set_always_on_top(true);
+                        let _ = webview.evaluate_script("if (typeof broadcastOverlayState === 'function') broadcastOverlayState();");
                     }
                     let toast = if overlay_is_visible {
                         "window.showToast && window.showToast('🎮 Оверлей поверх игр: ВКЛ (Shift + ~)');"
