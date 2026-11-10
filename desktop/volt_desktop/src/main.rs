@@ -62,180 +62,177 @@ const OVERLAY_HTML: &str = r###"<!DOCTYPE html>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      width: 100%; height: 100%;
+      width: 100%;
+      height: 100%;
       background: transparent !important;
       overflow: hidden;
       user-select: none;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
-    .overlay-card {
-      background: rgba(8, 8, 12, 0.78);
+    #overlay-root {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 8px;
+    }
+    .hud-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(10, 10, 14, 0.86);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      padding: 3px 10px;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    }
+    .hud-badge .bolt { color: #EBFB10; font-size: 11px; }
+    .hud-badge .hotkey { color: #858484; font-size: 8.5px; font-family: Consolas, monospace; }
+
+    .users-container {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 5px;
+      width: 100%;
+    }
+
+    .user-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(12, 12, 16, 0.82);
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
       border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 20px;
-      padding: 12px 14px;
-      color: #fff;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
-      transition: opacity 0.25s ease;
-      opacity: 0.95;
+      border-radius: 999px;
+      padding: 3px 12px 3px 4px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+      opacity: 0.38;
+      max-width: 240px;
     }
-    .overlay-card.idle {
-      opacity: 0.28;
+
+    .user-pill.speaking {
+      opacity: 1.0 !important;
+      border-color: rgba(235, 251, 16, 0.65) !important;
+      background: rgba(18, 19, 11, 0.90) !important;
+      box-shadow: 0 0 16px rgba(235, 251, 16, 0.35), 0 8px 24px rgba(0,0,0,0.6) !important;
+      transform: translateX(3px);
     }
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      padding-bottom: 6px;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      color: #EBFB10;
-    }
-    .hotkey-badge {
-      font-size: 8.5px;
-      font-family: Consolas, monospace;
-      color: #9D9D9D;
-      background: rgba(255, 255, 255, 0.06);
-      padding: 2px 6px;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    .channel-name {
-      font-size: 10px;
-      color: #BABABA;
-      font-weight: 600;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .users-list {
-      display: flex;
-      flex-direction: column;
-      gap: 7px;
-      max-height: 260px;
-      overflow: hidden;
-    }
-    .user-row {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      padding: 3px 4px;
-      border-radius: 12px;
-      transition: all 0.18s ease;
-    }
-    .avatar-wrap {
-      position: relative;
-      width: 28px;
-      height: 28px;
+
+    .avatar-circle {
+      width: 26px;
+      height: 26px;
       border-radius: 50%;
-      background: #121316;
-      border: 1.5px solid rgba(255, 255, 255, 0.16);
+      background: #141518;
+      border: 1.5px solid rgba(255, 255, 255, 0.18);
       display: flex;
       align-items: center;
       justify-content: center;
+      color: #FFFFFF;
       font-size: 11px;
       font-weight: 700;
-      color: #fff;
       flex-shrink: 0;
       transition: all 0.18s ease;
     }
-    .user-row.speaking .avatar-wrap {
+
+    .user-pill.speaking .avatar-circle {
       border-color: #EBFB10 !important;
-      box-shadow: 0 0 14px rgba(235, 251, 16, 0.75) !important;
       color: #EBFB10 !important;
-      background: #18190B !important;
+      box-shadow: 0 0 12px rgba(235, 251, 16, 0.8) !important;
+      background: #1c1d0b !important;
     }
-    .user-name {
-      font-size: 11.5px;
+
+    .user-label {
+      font-size: 11px;
       font-weight: 600;
       color: #BABABA;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      flex: 1;
+      max-width: 140px;
     }
-    .user-row.speaking .user-name {
-      color: #FFFFFF;
-      font-weight: 700;
+
+    .user-pill.speaking .user-label {
+      color: #FFFFFF !important;
+      font-weight: 700 !important;
     }
+
     .eq-bars {
       display: none;
       align-items: flex-end;
       gap: 1.5px;
-      height: 10px;
+      height: 9px;
+      margin-left: 2px;
     }
-    .user-row.speaking .eq-bars {
-      display: flex;
+
+    .user-pill.speaking .eq-bars {
+      display: inline-flex;
     }
+
     .bar {
       width: 2px;
       background: #EBFB10;
       border-radius: 1px;
-      animation: barJump 0.35s infinite alternate ease-in-out;
+      animation: eqBounce 0.32s infinite alternate ease-in-out;
     }
-    .bar:nth-child(1) { height: 6px; animation-delay: 0.05s; }
-    .bar:nth-child(2) { height: 10px; animation-delay: 0.15s; }
-    .bar:nth-child(3) { height: 7px; animation-delay: 0.25s; }
-    @keyframes barJump {
+    .bar:nth-child(1) { height: 5px; animation-delay: 0.04s; }
+    .bar:nth-child(2) { height: 9px; animation-delay: 0.12s; }
+    .bar:nth-child(3) { height: 6px; animation-delay: 0.20s; }
+
+    @keyframes eqBounce {
       0% { height: 3px; }
-      100% { height: 10px; }
+      100% { height: 9px; }
     }
-    .muted-icon {
+
+    .mute-badge {
       font-size: 9px;
       color: #ED4245;
+      margin-left: -2px;
     }
   </style>
 </head>
 <body>
-  <div class="overlay-card idle" id="overlayCard">
-    <div class="header">
-      <div class="brand">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="#EBFB10"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        <span>ВОЛЬТ</span>
-      </div>
-      <span class="hotkey-badge">Shift + ~</span>
+  <div id="overlay-root">
+    <div class="hud-badge" id="hudBadge">
+      <span class="bolt">⚡</span>
+      <span id="hudChannel">VOLT</span>
+      <span class="hotkey">Shift + ~</span>
     </div>
-    <div class="channel-name" id="chanName">⚡ Основной канал</div>
-    <div class="users-list" id="usersList"></div>
+    <div class="users-container" id="usersContainer"></div>
   </div>
   <script>
     window.__voltOverlaySync = function(payload) {
       if (!payload) return;
-      const card = document.getElementById('overlayCard');
-      const chan = document.getElementById('chanName');
-      const list = document.getElementById('usersList');
-      if (chan && payload.room) chan.textContent = payload.room;
-      if (!list) return;
+      const chan = document.getElementById('hudChannel');
+      const container = document.getElementById('usersContainer');
+      if (chan && payload.room) chan.textContent = payload.room.replace('⚡', '').trim();
+      if (!container) return;
 
       const users = payload.users || [];
-      const anySpeaking = users.some(u => u.speaking);
-      if (card) {
-        card.classList.toggle('idle', !anySpeaking);
+      if (users.length === 0) {
+        container.innerHTML = '';
+        return;
       }
 
-      list.innerHTML = users.map(u => {
+      container.innerHTML = users.map(u => {
         const initial = (u.name || '?').charAt(0).toUpperCase();
         const speakingClass = u.speaking ? 'speaking' : '';
-        const botIcon = u.is_bot ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#EBFB10" stroke-width="2.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>' : initial;
+        const botIcon = u.is_bot ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#EBFB10" stroke-width="2.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>' : initial;
         return `
-          <div class="user-row ${speakingClass}">
-            <div class="avatar-wrap">${botIcon}</div>
-            <span class="user-name">${u.name}</span>
+          <div class="user-pill ${speakingClass}">
+            <div class="avatar-circle">${botIcon}</div>
+            <span class="user-label">${u.name}</span>
             <div class="eq-bars">
               <span class="bar"></span><span class="bar"></span><span class="bar"></span>
             </div>
-            ${u.muted ? '<span class="muted-icon">🔇</span>' : ''}
+            ${u.muted ? '<span class="mute-badge">🔇</span>' : ''}
           </div>
         `;
       }).join('');
@@ -667,7 +664,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (hwid, dev_name) = compute_hardware_id();
     let init_script = format!(
-        "window.__VOLT_DESKTOP__ = true; window.__VOLT_SUPPORTS_RELAUNCH__ = true; window.__VOLT_CLIENT_KIND__ = 'main'; window.__VOLT_EXE_VERSION__ = '{}'; window.__VOLT_EXE_SHA256__ = '{}'; window.__VOLT_HARDWARE_ID__ = '{}'; window.__VOLT_DEVICE_NAME__ = '{}';",
+        "window.__VOLT_DESKTOP__ = true; window.__VOLT_SUPPORTS_RELAUNCH__ = true; window.__VOLT_CLIENT_KIND__ = 'main'; window.__VOLT_EXE_VERSION__ = '{}'; window.__VOLT_EXE_SHA256__ = '{}'; window.__VOLT_HARDWARE_ID__ = '{}'; window.__VOLT_DEVICE_NAME__ = '{}'; if (!window.ipc && window.chrome && window.chrome.webview) {{ window.ipc = {{ postMessage: function(msg) {{ window.chrome.webview.postMessage(msg); }} }}; }}",
         APP_VERSION, local_sha, hwid, js_escape(&dev_name)
     );
 
