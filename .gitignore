@@ -1,0 +1,26 @@
+# Environment & Secrets
+.env
+*.local.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+uploads/
+
+# Rust / Desktop Builds
+desktop/*/target/
+*.exe
+*.old
+*.new
+*.pdb
+*.WebView2/
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

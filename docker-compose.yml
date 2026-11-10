@@ -1,0 +1,58 @@
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./deploy/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
+
+  caddy:
+    image: caddy:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DOMAIN=${DOMAIN}
+    depends_on:
+      - livekit
+      - volt-app
+
+  volt-app:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      - VOLT_PORT=3000
+      - DOMAIN=${DOMAIN}
+      - LIVEKIT_URL=http://livekit:7880
+      - LIVEKIT_PUBLIC_WS=wss://${DOMAIN}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - MUSIC_BOT_URL=http://volt-bot:7777
+      - OWNER_HARDWARE_IDS=${OWNER_HARDWARE_IDS}
+      - OWNER_NAMES=${OWNER_NAMES}
+    depends_on:
+      - livekit
+
+  volt-bot:
+    build: ./music-bot
+    restart: unless-stopped
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - BOT_PORT=7777
+    depends_on:
+      - livekit
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,20 @@
+port: 7880
+log_level: info
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: true
+  # Set your VPS public IPv4 address if behind NAT:
+  # node_ip: 203.0.113.10
+
+keys:
+  # Must match LIVEKIT_API_KEY and LIVEKIT_API_SECRET in .env
+  volt_key: replace_with_a_strong_32_char_random_secret
+
+room:
+  auto_create: true
+  empty_timeout: 300
+  departure_timeout: 300
+  max_participants: 20

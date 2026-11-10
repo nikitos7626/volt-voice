@@ -1,0 +1,14 @@
+{$DOMAIN} {
+    # LiveKit WebRTC signaling & Twirp RPC
+    @livekit path /rtc* /twirp*
+    handle @livekit {
+        reverse_proxy livekit:7880 {
+            flush_interval -1
+        }
+    }
+
+    # VOLT Frontend, Token API & Music Proxy
+    handle {
+        reverse_proxy volt-app:3000
+    }
+}

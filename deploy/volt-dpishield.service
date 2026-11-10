@@ -1,0 +1,11 @@
+[Unit]
+Description=Drop out-of-order DPI-bypass fake ClientHello packets on TCP 443 to prevent WebRTC SACK corruption
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -t raw -C PREROUTING -p tcp --dport 443 -m string --algo bm --hex-string "|16030102a6010002a2|" -m length --length 735 -j DROP 2>/dev/null || iptables -t raw -I PREROUTING -p tcp --dport 443 -m string --algo bm --hex-string "|16030102a6010002a2|" -m length --length 735 -j DROP'
+
+[Install]
+WantedBy=multi-user.target
