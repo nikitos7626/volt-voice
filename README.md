@@ -52,12 +52,26 @@
 volt-voice/
 ├── docker-compose.yml          # Единый стек: LiveKit + Caddy + volt-app + volt-bot
 ├── .env.example                # Шаблон переменных окружения и ключей
-├── server/                     # Веб-бэкенд, JWT-токены LiveKit, отдача статики и прокси плеера
-│   ├── app.py
+├── server/                     # Модульный веб-бэкенд и диспетчер запросов
+│   ├── app.py                  # Точка входа HTTP-сервера и таблица маршрутизации
+│   ├── config.py               # Конфигурация и переменные окружения
+│   ├── router.py               # Декларативный роутер запросов (GET / POST / Prefix)
+│   ├── models/                 # [M] Потокобезопасное состояние комнат и сессий железа
+│   │   └── state.py
+│   ├── services/               # [S] Сервисный слой (JWT, Twirp RPC, хэширование, проксирование)
+│   │   ├── token_service.py    # Выпуск JWT-токенов LiveKit
+│   │   ├── livekit_client.py   # Twirp RPC клиент LiveKit (список/удаление участников)
+│   │   ├── static_service.py   # SHA-256 кэш файлов и инъекция хэша
+│   │   └── music_proxy.py      # Стриминг команд и загрузка файлов в плеер
+│   ├── controllers/            # [C] Контроллеры эндпоинтов
+│   │   ├── room_controller.py  # Присутствие, комнаты, heartbeat и leave
+│   │   ├── token_controller.py # Генерация токенов доступа и манифест версий
+│   │   ├── music_controller.py # Управление плеером и загрузка аудиофайлов
+│   │   └── static_controller.py# Отдача веб-клиента, пульта и бинарников
 │   ├── Dockerfile
-│   └── static/
-│       ├── index.html          # Основной клиент (Dark Liquid Glass, WebRTC, чат, тест микрофона)
-│       ├── music.html          # Встроенный пульт VOLT MUSIC
+│   └── static/                 # [V] Клиентский UI (Dark Liquid Glass SPA, WebRTC, плеер)
+│       ├── index.html
+│       ├── music.html
 │       ├── livekit-client.umd.min.js
 │       └── anime.min.js
 ├── music-bot/                  # Независимый Hi-Fi аудио-сервис VOLT MUSIC (Python + FFmpeg + yt-dlp)
@@ -74,6 +88,8 @@ volt-voice/
 │   ├── Caddyfile
 │   ├── livekit.yaml.template
 │   └── volt-dpishield.service
+├── tests/                      # Интеграционные тесты модульного сервера
+│   └── test_server_modular.py
 └── screenshots/                # Скриншоты интерфейса
 ```
 
