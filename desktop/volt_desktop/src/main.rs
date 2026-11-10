@@ -74,179 +74,164 @@ const OVERLAY_HTML: &str = r###"<!DOCTYPE html>
       width: 100%;
       height: 100%;
       background: transparent !important;
+      background-color: transparent !important;
       overflow: hidden;
       user-select: none;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     }
-    #overlay-root {
+    #widget {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: 6px;
-      padding: 8px;
+      gap: 10px;
+      padding: 10px;
     }
-    .hud-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(10, 10, 14, 0.86);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 999px;
-      padding: 3px 10px;
-      color: #fff;
-      font-size: 10px;
-      font-weight: 700;
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
-    }
-    .hud-badge .bolt { color: #EBFB10; font-size: 11px; }
-    .hud-badge .hotkey { color: #858484; font-size: 8.5px; font-family: Consolas, monospace; }
-
-    .users-container {
+    #usersList {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: 5px;
+      gap: 10px;
       width: 100%;
     }
-
-    .user-pill {
+    .user-entry {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      background: rgba(12, 12, 16, 0.82);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 999px;
-      padding: 3px 12px 3px 4px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
-      transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-      opacity: 0.38;
-      max-width: 240px;
+      gap: 12px;
+      transition: transform 0.12s ease;
     }
-
-    .user-pill.speaking {
-      opacity: 1.0 !important;
-      border-color: rgba(235, 251, 16, 0.65) !important;
-      background: rgba(18, 19, 11, 0.90) !important;
-      box-shadow: 0 0 16px rgba(235, 251, 16, 0.35), 0 8px 24px rgba(0,0,0,0.6) !important;
-      transform: translateX(3px);
+    .user-entry.speaking {
+      transform: translateX(4px);
     }
-
-    .avatar-circle {
-      width: 26px;
-      height: 26px;
+    .avatar-frame {
+      position: relative;
+      width: 42px;
+      height: 42px;
       border-radius: 50%;
-      background: #141518;
-      border: 1.5px solid rgba(255, 255, 255, 0.18);
+      background: #1e1f24;
+      border: 2px solid transparent;
       display: flex;
       align-items: center;
       justify-content: center;
       color: #FFFFFF;
-      font-size: 11px;
+      font-size: 15px;
       font-weight: 700;
       flex-shrink: 0;
-      transition: all 0.18s ease;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-
-    .user-pill.speaking .avatar-circle {
+    .user-entry.speaking .avatar-frame {
       border-color: #EBFB10 !important;
+      box-shadow: 0 0 18px rgba(235, 251, 16, 0.9), 0 4px 14px rgba(0, 0, 0, 0.7) !important;
+      background: #1b1c0e !important;
       color: #EBFB10 !important;
-      box-shadow: 0 0 12px rgba(235, 251, 16, 0.8) !important;
-      background: #1c1d0b !important;
     }
-
-    .user-label {
-      font-size: 11px;
+    .name-bubble {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(18, 19, 23, 0.88);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      padding: 6px 14px;
+      color: #dcddde;
+      font-size: 13px;
       font-weight: 600;
-      color: #BABABA;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+      max-width: 190px;
+      transition: all 0.15s ease;
+    }
+    .user-entry.speaking .name-bubble {
+      color: #FFFFFF !important;
+      background: rgba(24, 25, 30, 0.96) !important;
+      border-color: rgba(235, 251, 16, 0.4) !important;
+    }
+    .name-text {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 140px;
     }
-
-    .user-pill.speaking .user-label {
-      color: #FFFFFF !important;
-      font-weight: 700 !important;
-    }
-
-    .eq-bars {
-      display: none;
-      align-items: flex-end;
-      gap: 1.5px;
-      height: 9px;
+    .mic-off-icon {
+      font-size: 11px;
+      color: #ED4245;
       margin-left: 2px;
     }
-
-    .user-pill.speaking .eq-bars {
+    .bot-pill {
+      font-size: 8.5px;
+      font-weight: 800;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: rgba(235, 251, 16, 0.16);
+      color: #EBFB10;
+      border: 1px solid rgba(235, 251, 16, 0.35);
+      letter-spacing: 0.04em;
+    }
+    .bottom-bar {
+      margin-top: 4px;
       display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(14, 15, 18, 0.88);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      padding: 5px 12px;
+      color: #9D9D9D;
+      font-size: 11px;
+      font-weight: 700;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
     }
-
-    .bar {
-      width: 2px;
-      background: #EBFB10;
-      border-radius: 1px;
-      animation: eqBounce 0.32s infinite alternate ease-in-out;
-    }
-    .bar:nth-child(1) { height: 5px; animation-delay: 0.04s; }
-    .bar:nth-child(2) { height: 9px; animation-delay: 0.12s; }
-    .bar:nth-child(3) { height: 6px; animation-delay: 0.20s; }
-
-    @keyframes eqBounce {
-      0% { height: 3px; }
-      100% { height: 9px; }
-    }
-
-    .mute-badge {
-      font-size: 9px;
-      color: #ED4245;
-      margin-left: -2px;
-    }
+    .bottom-bar .bolt { color: #EBFB10; font-size: 12px; }
+    .bottom-bar .hotkey { color: #65656d; font-family: Consolas, monospace; font-size: 9px; }
   </style>
 </head>
 <body>
-  <div id="overlay-root">
-    <div class="hud-badge" id="hudBadge">
-      <span class="bolt">⚡</span>
-      <span id="hudChannel">VOLT</span>
-      <span class="hotkey">Shift + ~</span>
-    </div>
-    <div class="users-container" id="usersContainer">
-      <div class="user-pill" style="opacity:0.65;">
-        <div class="avatar-circle">⚡</div>
-        <span class="user-label">Основной канал</span>
+  <div id="widget">
+    <div id="usersList">
+      <div class="user-entry">
+        <div class="avatar-frame">⚡</div>
+        <div class="name-bubble"><span class="name-text">Ожидание...</span></div>
       </div>
+    </div>
+    <div class="bottom-bar" id="bottomBar">
+      <span class="bolt">⚡</span>
+      <span id="channelLabel">Основной канал</span>
+      <span class="hotkey">Shift + ~</span>
     </div>
   </div>
   <script>
     window.__voltOverlaySync = function(payload) {
       if (!payload) return;
-      const chan = document.getElementById('hudChannel');
-      const container = document.getElementById('usersContainer');
+      const chan = document.getElementById('channelLabel');
+      const list = document.getElementById('usersList');
       if (chan && payload.room) chan.textContent = payload.room.replace('⚡', '').trim();
-      if (!container) return;
+      if (!list) return;
 
       const users = payload.users || [];
       if (users.length === 0) {
-        container.innerHTML = '';
+        list.innerHTML = `
+          <div class="user-entry">
+            <div class="avatar-frame">⚡</div>
+            <div class="name-bubble"><span class="name-text">Ожидание...</span></div>
+          </div>
+        `;
         return;
       }
 
-      container.innerHTML = users.map(u => {
+      list.innerHTML = users.map(u => {
         const initial = (u.name || '?').charAt(0).toUpperCase();
         const speakingClass = u.speaking ? 'speaking' : '';
-        const botIcon = u.is_bot ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#EBFB10" stroke-width="2.5"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>' : initial;
+        const botIcon = u.is_bot ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EBFB10" stroke-width="2.2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>' : initial;
         return `
-          <div class="user-pill ${speakingClass}">
-            <div class="avatar-circle">${botIcon}</div>
-            <span class="user-label">${u.name}</span>
-            <div class="eq-bars">
-              <span class="bar"></span><span class="bar"></span><span class="bar"></span>
+          <div class="user-entry ${speakingClass}">
+            <div class="avatar-frame">${botIcon}</div>
+            <div class="name-bubble">
+              <span class="name-text">${u.name}</span>
+              ${u.is_bot ? '<span class="bot-pill">ПЛЕЕР</span>' : ''}
+              ${u.muted ? '<span class="mic-off-icon">🔇</span>' : ''}
             </div>
-            ${u.muted ? '<span class="mute-badge">🔇</span>' : ''}
           </div>
         `;
       }).join('');
