@@ -1,14 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-const VOLT_SERVER_URL: &str = match option_env!("VOLT_SERVER_URL") {
-    Some(v) => v,
-    None => "https://voice.example.com",
-};
-
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use tao::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder},
@@ -20,6 +16,7 @@ use wry::{PermissionResponse, WebViewBuilder};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+const COMPILED_SERVER_URL: Option<&str> = option_env!("VOLT_SERVER_URL");
 const ICON_32_BYTES: &[u8] = include_bytes!("../icon_32.rgba");
 const ICON_64_BYTES: &[u8] = include_bytes!("../icon_64.rgba");
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -31,6 +28,146 @@ enum UserEvent {
     EvalJs(String),
     ReloadFresh(String),
     RestartNewExe(PathBuf),
+}
+
+fn normalize_server_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
+        let after_scheme = trimmed
+            .strip_prefix("https://")
+            .or_else(|| trimmed.strip_prefix("http://"))
+            .unwrap_or("");
+        if !after_scheme.is_empty() && !after_scheme.contains(char::is_whitespace) {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+fn saved_config_path() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(|d| PathBuf::from(d).join("VOLT").join("server_url.txt"))
+}
+
+fn resolve_initial_server_url() -> Option<String> {
+    if let Some(url) = COMPILED_SERVER_URL {
+        if let Some(clean) = normalize_server_url(url) {
+            return Some(clean);
+        }
+    }
+    if let Ok(exe_path) = std::env::current_exe() {
+        let portable_cfg = exe_path.with_file_name("volt_server.txt");
+        if let Ok(txt) = std::fs::read_to_string(portable_cfg) {
+            if let Some(clean) = normalize_server_url(&txt) {
+                return Some(clean);
+            }
+        }
+    }
+    if let Some(app_cfg) = saved_config_path() {
+        if let Ok(txt) = std::fs::read_to_string(app_cfg) {
+            if let Some(clean) = normalize_server_url(&txt) {
+                return Some(clean);
+            }
+        }
+    }
+    None
+}
+
+fn persist_server_url(url: &str) -> Result<(), String> {
+    if let Some(cfg_path) = saved_config_path() {
+        if let Some(parent) = cfg_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Не удалось создать папку настроек: {}", e))?;
+        }
+        std::fs::write(&cfg_path, url)
+            .map_err(|e| format!("Не удалось сохранить адрес сервера: {}", e))?;
+    }
+    Ok(())
+}
+
+fn setup_screen_html() -> &'static str {
+    r###"<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>VOLT — Подключение к серверу</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html {
+      width: 100%; height: 100%;
+      background: #000000; color: #FFFFFF;
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; user-select: none;
+    }
+    .orb {
+      position: fixed; border-radius: 50%; filter: blur(130px); pointer-events: none;
+    }
+    .orb-1 { width: 420px; height: 420px; top: -120px; left: -100px; background: rgba(235, 251, 16, 0.12); }
+    .orb-2 { width: 380px; height: 380px; bottom: -120px; right: -80px; background: rgba(255, 255, 255, 0.05); }
+    .card {
+      position: relative; z-index: 2; width: 460px; max-width: 92vw;
+      background: linear-gradient(145deg, rgba(16,16,18,0.82), rgba(8,8,10,0.74));
+      backdrop-filter: blur(26px); -webkit-backdrop-filter: blur(26px);
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 24px;
+      padding: 32px; box-shadow: 0 24px 60px rgba(0,0,0,0.8);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .badge { font-size: 11px; font-weight: 700; color: #EBFB10; letter-spacing: 0.08em; }
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    p { font-size: 13px; color: #9D9D9D; line-height: 1.5; margin-bottom: 20px; }
+    label { display: block; font-size: 11px; font-weight: 600; color: #BABABA; margin-bottom: 8px; letter-spacing: 0.04em; }
+    input {
+      width: 100%; height: 44px; border-radius: 12px;
+      background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.14);
+      color: #FFFFFF; padding: 0 14px; font-size: 13.5px; outline: none;
+      margin-bottom: 14px; transition: border-color 0.15s;
+    }
+    input:focus { border-color: #EBFB10; }
+    .err { color: #ED4245; font-size: 12px; margin-bottom: 12px; min-height: 16px; }
+    button {
+      width: 100%; height: 44px; border-radius: 12px; border: none;
+      background: #EBFB10; color: #000000; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: background 0.15s;
+    }
+    button:hover { background: #d8e80e; }
+    .hint { font-size: 11px; color: #707078; margin-top: 14px; line-height: 1.45; }
+    code { color: #BABABA; font-family: Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <form class="card" id="setup-form">
+    <div class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="#EBFB10"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      <span class="badge">VOLT DESKTOP</span>
+    </div>
+    <h1>Подключение к серверу</h1>
+    <p>Укажите URL вашего self-hosted сервера VOLT, чтобы подключиться к голосовому каналу и встроенному плееру.</p>
+    <label for="srv-url">АДРЕС СЕРВЕРА</label>
+    <input id="srv-url" type="url" placeholder="https://voice.example.com" autofocus required />
+    <div class="err" id="err-box"></div>
+    <button type="submit">ПОДКЛЮЧИТЬСЯ</button>
+    <div class="hint">Адрес сохраняется локально. Можно также положить файл <code>volt_server.txt</code> рядом с программой.</div>
+  </form>
+  <script>
+    window.__voltSetupError = (msg) => {
+      document.getElementById('err-box').textContent = msg || 'Некорректный URL';
+    };
+    document.getElementById('setup-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const val = document.getElementById('srv-url').value.trim();
+      if (!/^https?:\/\/\S+$/i.test(val)) {
+        window.__voltSetupError('Введите корректный URL (начинается с https:// или http://)');
+        return;
+      }
+      document.getElementById('err-box').textContent = '';
+      window.ipc.postMessage('set_server|' + val);
+    });
+  </script>
+</body>
+</html>"###
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
@@ -120,11 +257,12 @@ fn send_pct(proxy: &tao::event_loop::EventLoopProxy<UserEvent>, pct: u64, label:
 
 fn perform_self_update(
     url: &str,
+    expected_base: &str,
     expected_sha: &str,
     expected_size: u64,
     proxy: &tao::event_loop::EventLoopProxy<UserEvent>,
 ) -> Result<PathBuf, String> {
-    if !url.starts_with(VOLT_SERVER_URL) {
+    if expected_base.is_empty() || !url.starts_with(expected_base) {
         return Err("Недопустимый URL обновления".to_string());
     }
     let cur_exe =
@@ -239,6 +377,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|p| sha256_file(&p).ok())
         .unwrap_or_default();
 
+    let initial_url = resolve_initial_server_url();
+    let active_server = Arc::new(RwLock::new(initial_url.clone().unwrap_or_default()));
+
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
@@ -266,8 +407,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let ipc_proxy = proxy.clone();
-    let webview = WebViewBuilder::new()
-        .with_url(VOLT_SERVER_URL)
+    let ipc_server = Arc::clone(&active_server);
+    let mut wb = WebViewBuilder::new()
         .with_background_color((0, 0, 0, 255))
         .with_autoplay(true)
         .with_clipboard(true)
@@ -282,8 +423,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return;
             }
+            if let Some(raw_url) = body.strip_prefix("set_server|") {
+                if let Some(clean_url) = normalize_server_url(raw_url) {
+                    if let Err(err_msg) = persist_server_url(&clean_url) {
+                        let js = format!("window.__voltSetupError && window.__voltSetupError('{}');", js_escape(&err_msg));
+                        let _ = ipc_proxy.send_event(UserEvent::EvalJs(js));
+                        return;
+                    }
+                    if let Ok(mut guard) = ipc_server.write() {
+                        *guard = clean_url.clone();
+                    }
+                    let _ = ipc_proxy.send_event(UserEvent::ReloadFresh(clean_url));
+                } else {
+                    let _ = ipc_proxy.send_event(UserEvent::EvalJs(
+                        "window.__voltSetupError && window.__voltSetupError('Укажите URL с http:// или https://');".to_string(),
+                    ));
+                }
+                return;
+            }
+            let current_base = ipc_server.read().map(|g| g.clone()).unwrap_or_default();
             if let Some(url) = body.strip_prefix("reload|") {
-                if url.starts_with(VOLT_SERVER_URL) {
+                if !current_base.is_empty() && url.starts_with(&current_base) {
                     let _ = ipc_proxy.send_event(UserEvent::ReloadFresh(url.to_string()));
                 }
                 return;
@@ -298,7 +458,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let p_clone = ipc_proxy.clone();
                 std::thread::spawn(move || {
-                    match perform_self_update(&url, &sha, size_val, &p_clone) {
+                    match perform_self_update(&url, &current_base, &sha, size_val, &p_clone) {
                         Ok(exe_path) => {
                             let _ = p_clone.send_event(UserEvent::RestartNewExe(exe_path));
                         }
@@ -313,9 +473,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 });
             }
-        })
-        .build(&window)?;
+        });
 
+    wb = match initial_url {
+        Some(url) => wb.with_url(&url),
+        None => wb.with_html(setup_screen_html()),
+    };
+
+    let webview = wb.build(&window)?;
+
+    let leave_server = Arc::clone(&active_server);
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -323,18 +490,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => {
-                let mut cmd = Command::new("curl.exe");
-                cmd.args([
-                    "-sSL",
-                    "--connect-timeout",
-                    "1",
-                    "--max-time",
-                    "1",
-                    &format!("{}/api/leave?hwid={}", VOLT_SERVER_URL.trim_end_matches('/'), hwid),
-                ]);
-                #[cfg(windows)]
-                cmd.creation_flags(0x08000000);
-                let _ = cmd.spawn();
+                let base_url = leave_server.read().map(|g| g.clone()).unwrap_or_default();
+                if !base_url.is_empty() {
+                    let mut cmd = Command::new("curl.exe");
+                    cmd.args([
+                        "-sSL",
+                        "--connect-timeout",
+                        "1",
+                        "--max-time",
+                        "1",
+                        &format!("{}/api/leave?hwid={}", base_url.trim_end_matches('/'), hwid),
+                    ]);
+                    #[cfg(windows)]
+                    cmd.creation_flags(0x08000000);
+                    let _ = cmd.spawn();
+                }
                 *control_flow = ControlFlow::Exit;
             }
             Event::UserEvent(user_evt) => match user_evt {
@@ -352,4 +522,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_server_url;
+
+    #[test]
+    fn test_normalize_server_url() {
+        assert_eq!(
+            normalize_server_url("  https://voice.example.com/  "),
+            Some("https://voice.example.com".to_string())
+        );
+        assert_eq!(
+            normalize_server_url("http://127.0.0.1:3000/"),
+            Some("http://127.0.0.1:3000".to_string())
+        );
+        assert_eq!(normalize_server_url("voice.example.com"), None);
+        assert_eq!(normalize_server_url("https://"), None);
+        assert_eq!(normalize_server_url("javascript:alert(1)"), None);
+    }
 }
