@@ -3135,6 +3135,7 @@
               speakingHoldTimes.set(s.identity, now);
             }
           });
+          broadcastOverlayState();
         })
         .on(LivekitClient.RoomEvent.ParticipantDisconnected, (p) => {
           updateParticipants(room);
@@ -3254,14 +3255,28 @@
       }
     }
 
+    function postDesktopIpc(msg) {
+      try {
+        if (window.ipc && typeof window.ipc.postMessage === 'function') {
+          window.ipc.postMessage(msg);
+          return true;
+        }
+        if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === 'function') {
+          window.chrome.webview.postMessage(msg);
+          return true;
+        }
+      } catch(e) {}
+      return false;
+    }
+
     let lastOverlaySyncTime = 0;
     function broadcastOverlayState() {
-      if (!window.__VOLT_DESKTOP__ || !window.ipc || !currentRoom) return;
+      if (!window.__VOLT_DESKTOP__ || !currentRoom) return;
       try {
         const users = [];
         if (currentRoom.localParticipant) {
           const lp = currentRoom.localParticipant;
-          const isSpk = (performance.now() - (speakingHoldTimes.get(lp.identity) || 0) < 350);
+          const isSpk = (performance.now() - (speakingHoldTimes.get(lp.identity) || 0) < 400);
           users.push({
             name: (lp.name || lp.identity || 'Вы').replace('(Вы)', '').trim(),
             is_me: true,
@@ -3271,7 +3286,7 @@
           });
         }
         currentRoom.remoteParticipants.forEach(rp => {
-          const isSpk = (performance.now() - (speakingHoldTimes.get(rp.identity) || 0) < 350);
+          const isSpk = (performance.now() - (speakingHoldTimes.get(rp.identity) || 0) < 400);
           const isMuted = !rp.audioTrackPublications.some(pub => pub.track && !pub.isMuted);
           const isBot = (rp.name || rp.identity || '').includes('[MUSIC]') || (rp.name || rp.identity || '').includes('VOLT MUSIC');
           users.push({
@@ -3282,19 +3297,28 @@
             is_bot: isBot
           });
         });
-        window.ipc.postMessage('overlay_sync|' + JSON.stringify({
+        postDesktopIpc('overlay_sync|' + JSON.stringify({
           room: currentRoom.name === 'lounge' ? '⚡ Основной канал' : currentRoom.name,
           users: users
         }));
       } catch(e) {}
     }
+    window.broadcastOverlayState = broadcastOverlayState;
 
     function clearOverlayState() {
-      if (!window.__VOLT_DESKTOP__ || !window.ipc) return;
+      if (!window.__VOLT_DESKTOP__) return;
       try {
-        window.ipc.postMessage('overlay_sync|' + JSON.stringify({ room: '', users: [] }));
+        postDesktopIpc('overlay_sync|' + JSON.stringify({ room: '', users: [] }));
       } catch(e) {}
     }
+    window.clearOverlayState = clearOverlayState;
+
+    // Background overlay broadcaster: runs on timer so it NEVER pauses when games have full focus
+    setInterval(() => {
+      if (window.__VOLT_DESKTOP__ && currentRoom) {
+        broadcastOverlayState();
+      }
+    }, 80);
 
     function startVisualizerLoop() {
       if (visualizerLoopRunning) return;
@@ -3394,7 +3418,7 @@
         });
 
         // 3. Broadcast overlay status every ~80ms in desktop app
-        if (window.__VOLT_DESKTOP__ && window.ipc && (now - lastOverlaySyncTime > 80)) {
+        if (window.__VOLT_DESKTOP__ && (now - lastOverlaySyncTime > 80)) {
           lastOverlaySyncTime = now;
           broadcastOverlayState();
         }
@@ -3628,6 +3652,7 @@
         });
       }
       startVisualizerLoop();
+      broadcastOverlayState();
     }
 
     const activeStreams = new Map(); // identity -> { track, participant, name }
@@ -4627,7 +4652,7 @@
           btnToggleOverlay.style.display = 'inline-flex';
         }
         btnToggleOverlay.addEventListener('click', () => {
-          if (window.ipc) window.ipc.postMessage('toggle_overlay');
+          postDesktopIpc('toggle_overlay');
         });
       }
 
