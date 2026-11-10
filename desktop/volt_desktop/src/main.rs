@@ -47,7 +47,16 @@ struct WinMsg {
 }
 
 #[cfg(windows)]
+#[repr(C)]
+struct MARGINS {
+    cxLeftWidth: i32,
+    cxRightWidth: i32,
+    cyTopHeight: i32,
+    cyBottomHeight: i32,
+}
+
 extern "system" {
+    fn DwmExtendFrameIntoClientArea(hWnd: isize, pMarInset: *const MARGINS) -> i32;
     fn RegisterHotKey(hWnd: isize, id: i32, fsModifiers: u32, vk: u32) -> i32;
     fn UnregisterHotKey(hWnd: isize, id: i32) -> i32;
     fn GetMessageW(lpMsg: *mut WinMsg, hWnd: isize, wMsgFilterMin: u32, wMsgFilterMax: u32) -> i32;
@@ -621,6 +630,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_decorations(false)
         .with_always_on_top(true)
         .with_transparent(true)
+        .with_background_color((0, 0, 0, 0))
         .with_resizable(false)
         .with_visible(false);
 
@@ -631,7 +641,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let hwnd = overlay_window.hwnd() as isize;
         let cur = GetWindowLongPtrW(hwnd, -20); // GWL_EXSTYLE
         // WS_EX_TRANSPARENT (0x20) + WS_EX_LAYERED (0x80000) + WS_EX_TOOLWINDOW (0x80)
-        SetWindowLongPtrW(hwnd, -20, cur | 0x00000020 | 0x00080000 | 0x00000080);
+        let m = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &m);
+        SetWindowLongPtrW(hwnd, -20, cur | 0x00000020 | 0x00000080);
     }
 
     let overlay_webview = WebViewBuilder::new()
