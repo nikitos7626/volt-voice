@@ -3657,22 +3657,46 @@
       }
     }
 
+    function extractHwKey(identity) {
+      if (!identity) return '';
+      const m = String(identity).match(/_([a-z0-9_]{6,})$/i);
+      return m ? m[1] : identity;
+    }
+
     function updateParticipants(room) {
       if (!room) return;
       const participantsMap = new Map();
       if (room.localParticipant) {
-        participantsMap.set(room.localParticipant.identity, room.localParticipant);
+        const localHw = extractHwKey(room.localParticipant.identity);
+        participantsMap.set(localHw, room.localParticipant);
       }
       room.remoteParticipants.forEach(p => {
         const isBot = (p.name || '').includes('[BOT]') || (p.name || '').includes('[MUSIC]');
+        const hwKey = isBot ? p.identity : extractHwKey(p.identity);
+
         if (!isBot && room.localParticipant) {
+          const localHw = extractHwKey(room.localParticipant.identity);
+          if (localHw && localHw === hwKey) {
+            return;
+          }
           const myClean = (room.localParticipant.name || '').trim().toLowerCase();
           const pClean = (p.name || '').trim().toLowerCase();
-          if (myClean && myClean === pClean && p.identity !== room.localParticipant.identity) {
+          if (myClean && myClean === pClean) {
             return;
           }
         }
-        participantsMap.set(p.identity, p);
+
+        // Hardware session deduplication: keep newest session if duplicate HWID reconnects
+        if (participantsMap.has(hwKey)) {
+          const existing = participantsMap.get(hwKey);
+          const existingJoined = Number(existing.joinedAt || 0);
+          const pJoined = Number(p.joinedAt || 0);
+          if (pJoined >= existingJoined) {
+            participantsMap.set(hwKey, p);
+          }
+        } else {
+          participantsMap.set(hwKey, p);
+        }
       });
       const participants = Array.from(participantsMap.values());
       if (userCount) userCount.textContent = participants.length;
