@@ -4789,6 +4789,15 @@
           body: file
         });
 
+        if (!resp.ok) {
+          let errText = `HTTP ${resp.status}`;
+          try {
+            const errJson = await resp.json();
+            if (errJson && errJson.error) errText = errJson.error;
+          } catch(e){}
+          throw new Error(errText);
+        }
+
         if (chatUploadProgress) chatUploadProgress.style.width = '85%';
         const data = await resp.json();
 
