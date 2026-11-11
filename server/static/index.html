@@ -88,6 +88,8 @@
       font-family: var(--font-sans);
       font-size: 10.5px;
       font-weight: 600;
+      text-decoration: none;
+      white-space: nowrap;
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -427,6 +429,7 @@
       font-family: var(--font-sans);
       font-weight: 600;
       letter-spacing: 0.03em;
+      white-space: nowrap;
       transition: all 0.15s ease;
       user-select: none;
     }
@@ -2391,9 +2394,6 @@
             <span>VOLT MUSIC</span>
           </div>
           <div class="music-deck-actions">
-            <a href="/VOLT_MUSIC.exe" download="VOLT_MUSIC.exe" class="btn-popout" id="btn-dl-music-exe" style="height:28px; font-size:9.5px; padding:0 10px;" title="Скачать отдельное приложение VOLT_MUSIC.exe">
-              <span>⬇ ОТДЕЛЬНЫЙ .EXE</span>
-            </a>
             <button type="button" class="btn-change-name" id="btn-close-music-modal" style="height:28px; padding:0 12px; font-size:10px;">✕ ЗАКРЫТЬ</button>
           </div>
         </div>
@@ -2667,6 +2667,18 @@
 
       const headerTag = document.getElementById('room-header-name');
       if (headerTag) headerTag.textContent = 'Лобби';
+
+      const lobbyDescEl = document.getElementById('lobby-desc');
+      if (lobbyDescEl) lobbyDescEl.textContent = 'Подключитесь к основному каналу, чтобы начать общение с друзьями.';
+      const lobbyProgEl = document.getElementById('lobby-connect-progress');
+      if (lobbyProgEl) lobbyProgEl.classList.add('hidden');
+      const btnLobbyJoinEl = document.getElementById('btn-lobby-join');
+      if (btnLobbyJoinEl) {
+        btnLobbyJoinEl.disabled = false;
+        btnLobbyJoinEl.classList.remove('connecting');
+      }
+      const labelLobbyJoinEl = document.getElementById('lobby-join-label');
+      if (labelLobbyJoinEl) labelLobbyJoinEl.textContent = '⚡ ВОЙТИ В КАНАЛ';
 
       activeServerRoom = null;
       fetchRoomsList();
@@ -4726,7 +4738,7 @@
                 }
 
                 showUpdateOverlay('ОБНОВЛЕНИЕ ИНТЕРФЕЙСА', 'Загрузка свежих модулей с сервера...', 30);
-                const freshUrl = `${window.location.origin}/?_v=${encodeURIComponent(serverWebHash)}`;
+                const freshUrl = `/?_v=${encodeURIComponent(serverWebHash)}`;
                 const pageResp = await fetch(freshUrl, { cache: 'no-store' });
                 if (!pageResp.ok) throw new Error('HTTP ' + pageResp.status);
 
