@@ -74,8 +74,18 @@ volt-voice/
 │       ├── music.html
 │       ├── livekit-client.umd.min.js
 │       └── anime.min.js
-├── music-bot/                  # Независимый Hi-Fi аудио-сервис VOLT MUSIC (Python + FFmpeg + yt-dlp)
-│   ├── bot.py
+├── music-bot/                  # Модульный Hi-Fi аудиосервис VOLT MUSIC (Python + LiveKit RTC + FFmpeg)
+│   ├── bot.py                  # Тонкая точка входа (~30 строк) и фабрика aiohttp
+│   ├── config.py               # Каталог радиостанций, пресеты EQ и калибровка громкости (-18.5 dB)
+│   ├── models/                 # [M] PlaybackState: очередь, история треков и режимы повтора
+│   │   └── playback_state.py
+│   ├── services/               # [S] Сервисный слой аудио
+│   │   ├── token_service.py    # Выпуск JWT-токена бота
+│   │   ├── track_resolver.py   # Поиск и резолвинг (Spotify, Apple, Яндекс, YT, SoundCloud)
+│   │   └── audio_engine.py     # Потоковый FFmpeg + libsoxr 28-bit (20мс PCM-нарезка)
+│   ├── controllers/            # [C] Контроллеры жизненного цикла и API
+│   │   ├── music_controller.py # Подключение к LiveKit, 5-мин автовыход, очередь и зацикливание
+│   │   └── http_routes.py      # Декларативные aiohttp роуты (/status, /play, /loop, /eq и др.)
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── desktop/
@@ -88,8 +98,9 @@ volt-voice/
 │   ├── Caddyfile
 │   ├── livekit.yaml.template
 │   └── volt-dpishield.service
-├── tests/                      # Интеграционные тесты модульного сервера
-│   └── test_server_modular.py
+├── tests/                      # Сквозные модульные и интеграционные тесты
+│   ├── test_server_modular.py
+│   └── test_music_bot_modular.py
 └── screenshots/                # Скриншоты интерфейса
 ```
 

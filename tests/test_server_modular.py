@@ -6,16 +6,10 @@ import unittest
 import os
 import sys
 import json
-import time
 
-SERVER_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "server")
-sys.path.insert(0, SERVER_DIR)
+ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+SERVER_DIR = os.path.join(ROOT_DIR, "server")
 
-from config import API_KEY, API_SECRET, DEFAULT_ROOM_ID
-from models.state import StateStore
-from services.token_service import generate_client_token, generate_admin_token
-from services.static_service import inject_web_hash, get_file_meta
-from router import Router
 
 class MockHandler:
     def __init__(self):
@@ -40,8 +34,34 @@ class MockHandler:
 
 
 class TestModularVoltServer(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Clear potentially colliding packages and submodules from other test suites
+        for mod in list(sys.modules.keys()):
+            if any(mod == p or mod.startswith(p + '.') for p in ['config', 'models', 'services', 'controllers', 'router', 'bot', 'app']):
+                sys.modules.pop(mod, None)
+        sys.path = [p for p in sys.path if not p.endswith("music-bot")]
+        if SERVER_DIR not in sys.path:
+            sys.path.insert(0, SERVER_DIR)
+
+        import config
+        from models import StateStore
+        from services.token_service import generate_client_token, generate_admin_token
+        from services.static_service import inject_web_hash
+        import router
+        from controllers import room_controller, token_controller
+
+        cls.config = config
+        cls.StateStore = StateStore
+        cls.generate_client_token = staticmethod(generate_client_token)
+        cls.generate_admin_token = staticmethod(generate_admin_token)
+        cls.inject_web_hash = staticmethod(inject_web_hash)
+        cls.Router = router.Router
+        cls.room_controller = room_controller
+        cls.token_controller = token_controller
+
     def test_state_store_thread_safe_presence(self):
-        store = StateStore()
+        store = self.StateStore()
         store.touch_user("lounge", "User1")
         store.touch_user("lounge", "User2")
         users = store.get_fallback_active_users("lounge")
@@ -63,13 +83,13 @@ class TestModularVoltServer(unittest.TestCase):
         import hmac
         import hashlib
 
-        token = generate_client_token("Alice", "lounge", hwid="hw_abcdef123456")
+        token = self.generate_client_token("Alice", "lounge", hwid="hw_abcdef123456")
         parts = token.split('.')
         self.assertEqual(len(parts), 3)
 
         payload_b64 = parts[1] + '=' * (-len(parts[1]) % 4)
         payload = json.loads(base64.urlsafe_b64decode(payload_b64).decode())
-        self.assertEqual(payload["iss"], API_KEY)
+        self.assertEqual(payload["iss"], self.config.API_KEY)
         self.assertEqual(payload["video"]["room"], "lounge")
         self.assertTrue(payload["video"]["canPublish"])
         self.assertTrue(payload["video"]["canSubscribe"])
@@ -77,13 +97,13 @@ class TestModularVoltServer(unittest.TestCase):
         # Signature check
         unsigned = f"{parts[0]}.{parts[1]}"
         expected_sig = base64.urlsafe_b64encode(
-            hmac.new(API_SECRET.encode(), unsigned.encode(), hashlib.sha256).digest()
+            hmac.new(self.config.API_SECRET.encode(), unsigned.encode(), hashlib.sha256).digest()
         ).rstrip(b'=').decode()
         self.assertEqual(parts[2], expected_sig)
 
     def test_admin_token_expiration(self):
         import base64
-        tok = generate_admin_token("lounge")
+        tok = self.generate_admin_token("lounge")
         parts = tok.split('.')
         payload_b64 = parts[1] + '=' * (-len(parts[1]) % 4)
         payload = json.loads(base64.urlsafe_b64decode(payload_b64).decode())
@@ -93,12 +113,12 @@ class TestModularVoltServer(unittest.TestCase):
 
     def test_static_hash_injection(self):
         sample_html = b"<!DOCTYPE html><html><head><title>Test</title></head><body>OK</body></html>"
-        injected = inject_web_hash(sample_html, "hash123")
+        injected = self.inject_web_hash(sample_html, "hash123")
         self.assertIn(b'window.__VOLT_INITIAL_WEB_HASH__="hash123";', injected)
         self.assertIn(b'</head>', injected)
 
     def test_router_dispatch_get_and_post(self):
-        r = Router()
+        r = self.Router()
 
         @r.get("/api/test")
         def handle_test(handler, query):
@@ -124,17 +144,15 @@ class TestModularVoltServer(unittest.TestCase):
         self.assertEqual(h3.code, 404)
 
     def test_controllers_invocation(self):
-        from controllers import room_controller, token_controller
-
         h = MockHandler()
-        room_controller.handle_get_rooms(h, {})
+        self.room_controller.handle_get_rooms(h, {})
         self.assertEqual(h.code, 200)
         res = json.loads(h.data.decode())
         self.assertTrue(res["ok"])
         self.assertEqual(res["rooms"][0]["id"], "lounge")
 
         h_tok = MockHandler()
-        token_controller.handle_token(h_tok, {"name": ["Bob"], "hwid": ["hw_999"]})
+        self.token_controller.handle_token(h_tok, {"name": ["Bob"], "hwid": ["hw_999"]})
         self.assertEqual(h_tok.code, 200)
         tok_data = json.loads(h_tok.data.decode())
         self.assertTrue(bool(tok_data["token"]))
