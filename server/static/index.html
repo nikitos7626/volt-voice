@@ -3002,6 +3002,9 @@
         hw = 'web_' + (Math.abs(h) % 0xFFFFFFF).toString(16);
         localStorage.setItem('volt_hwid', hw);
       }
+      try {
+        document.cookie = `volt_hwid=${encodeURIComponent(hw)}; path=/; max-age=31536000; SameSite=Lax`;
+      } catch(e){}
       return hw;
     }
 
@@ -4697,12 +4700,14 @@
 
       if (file && file.url) {
         const fileDiv = document.createElement('div');
+        const sep = file.url.includes('?') ? '&' : '?';
+        const fileSecUrl = `${file.url}${sep}hwid=${encodeURIComponent(getHardwareId())}&room=${encodeURIComponent(activeServerRoom || 'lounge')}`;
         if (file.is_image) {
           fileDiv.className = 'chat-media-preview';
-          fileDiv.innerHTML = `<img src="${escapeHtml(file.url)}" class="chat-img-thumb" alt="${escapeHtml(file.name || 'image')}" onclick="window.open('${escapeHtml(file.url)}', '_blank')" title="Открыть в полном размере"/>`;
+          fileDiv.innerHTML = `<img src="${escapeHtml(fileSecUrl)}" class="chat-img-thumb" alt="${escapeHtml(file.name || 'image')}" onclick="window.open('${escapeHtml(fileSecUrl)}', '_blank')" title="Открыть в полном размере"/>`;
         } else if (file.is_video) {
           fileDiv.className = 'chat-media-preview';
-          fileDiv.innerHTML = `<video controls class="chat-video-player" src="${escapeHtml(file.url)}"></video>`;
+          fileDiv.innerHTML = `<video controls class="chat-video-player" src="${escapeHtml(fileSecUrl)}"></video>`;
         } else {
           fileDiv.className = 'chat-file-card';
           const icon = getFileIcon(file.name);
@@ -4715,7 +4720,7 @@
                 <span class="chat-file-size">${sizeStr}</span>
               </div>
             </div>
-            <a href="${escapeHtml(file.url)}?download=1" download="${escapeHtml(file.name)}" class="chat-file-dl-btn">⬇ Скачать</a>
+            <a href="${escapeHtml(fileSecUrl)}&download=1" download="${escapeHtml(file.name)}" class="chat-file-dl-btn">⬇ Скачать</a>
           `;
         }
         row.appendChild(fileDiv);
@@ -4784,7 +4789,9 @@
         const resp = await fetch('/api/chat/upload', {
           method: 'POST',
           headers: {
-            'X-Filename': encodeURIComponent(file.name)
+            'X-Filename': encodeURIComponent(file.name),
+            'X-HWID': encodeURIComponent(getHardwareId()),
+            'X-Room': encodeURIComponent(activeServerRoom || 'lounge')
           },
           body: file
         });

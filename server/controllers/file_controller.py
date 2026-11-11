@@ -3,15 +3,54 @@ Chat File Upload & Secure Download Controller.
 Streams 64KB chunks directly to/from disk with strict XSS & size isolation.
 """
 import io
+import re
 import urllib.parse
 from config import MAX_FILE_SIZE_BYTES
 from services.file_service import save_uploaded_file, get_file_info
+from services.livekit_client import list_participants
+from models.state import state
 from controllers.token_controller import is_client_restricted
+
+
+def extract_request_hwid(handler, query=None) -> str:
+    h = handler.headers.get('X-HWID', '').strip()
+    if h:
+        return "".join(c for c in urllib.parse.unquote(h) if c.isalnum() or c == '_')[:16]
+    if query:
+        q = query.get('hwid', [''])[0].strip()
+        if q:
+            return "".join(c for c in q if c.isalnum() or c == '_')[:16]
+    cookie = handler.headers.get('Cookie', '')
+    m = re.search(r'volt_hwid=([^;]+)', cookie)
+    if m:
+        return "".join(c for c in urllib.parse.unquote(m.group(1).strip()) if c.isalnum() or c == '_')[:16]
+    return ""
+
+
+def is_client_in_active_room(room_id: str, hwid: str) -> bool:
+    if not hwid:
+        return False
+    parts = list_participants(room_id)
+    if parts is not None:
+        for p in parts:
+            ident = getattr(p, "identity", "") or (p if isinstance(p, str) else "")
+            if ident.endswith(f"_{hwid}") or f"_{hwid}_" in ident or ident == hwid:
+                return True
+    sess = state.get_hardware_session(hwid)
+    if sess and sess.get("room") == room_id:
+        return True
+    return False
 
 
 def handle_chat_upload_post(handler, query: dict, body: bytes):
     if is_client_restricted(handler, query):
         handler.send_json(403, {"ok": False, "error": "Загрузка файлов ограничена администратором"})
+        return
+
+    hwid = extract_request_hwid(handler, query)
+    room = urllib.parse.unquote(handler.headers.get('X-Room', 'lounge')) or 'lounge'
+    if not is_client_in_active_room(room, hwid):
+        handler.send_json(403, {"ok": False, "error": "Загрузка файлов разрешена только подключённым участникам активного канала"})
         return
     try:
         length = int(handler.headers.get('Content-Length', len(body) if body else 0))
@@ -34,6 +73,18 @@ def handle_chat_upload_post(handler, query: dict, body: bytes):
 
 
 def handle_serve_upload_get(handler, path: str, query: dict):
+    # Only active channel participants can access uploads
+    hwid = extract_request_hwid(handler, query)
+    room = query.get('room', ['lounge'])[0] or 'lounge'
+    if not is_client_in_active_room(room, hwid):
+        handler.send_response(403)
+        handler.send_header('Content-Type', 'text/plain; charset=utf-8')
+        msg = "403 Forbidden: Доступ к файлам разрешён только подключённым участникам активного канала.".encode('utf-8')
+        handler.send_header('Content-Length', str(len(msg)))
+        handler.end_headers()
+        handler.wfile.write(msg)
+        return
+
     # Expected path: /uploads/<fid>/<filename>
     rel = path[len('/uploads/'):].strip('/')
     parts = rel.split('/', 1)

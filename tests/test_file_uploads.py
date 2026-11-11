@@ -154,9 +154,21 @@ class TestFileUploads(unittest.TestCase):
         self.assertTrue(os.path.exists(fresh_folder))
 
     def test_file_controller_upload_and_serve(self):
+        from models.state import state
+        state.record_hardware_session("hw_testuser", "TestUser", "PC", "lounge")
+
+        # 1. Outsider without active room session is rejected with 403
+        h_outsider = MockHandler(
+            headers={"Content-Length": "10", "X-Filename": "hack.txt", "X-HWID": "stranger_hw"},
+            body=b"0123456789",
+        )
+        self.file_controller.handle_chat_upload_post(h_outsider, {}, b"0123456789")
+        self.assertEqual(h_outsider.code, 403)
+
+        # 2. Connected participant can upload
         content = b"Config file content: [server] port=8000"
         h_post = MockHandler(
-            headers={"Content-Length": str(len(content)), "X-Filename": "config.ini"},
+            headers={"Content-Length": str(len(content)), "X-Filename": "config.ini", "X-HWID": "hw_testuser"},
             body=content,
         )
         self.file_controller.handle_chat_upload_post(h_post, {}, content)
@@ -168,9 +180,14 @@ class TestFileUploads(unittest.TestCase):
         self.assertEqual(file_obj["name"], "config.ini")
         self.assertEqual(file_obj["size"], len(content))
 
-        # Test serving the file
-        h_get = MockHandler()
+        # 3. Outsider cannot download uploaded file
         serve_path = f"/uploads/{file_obj['id']}/config.ini"
+        h_get_outsider = MockHandler(headers={"X-HWID": "stranger_hw"})
+        self.file_controller.handle_serve_upload_get(h_get_outsider, serve_path, {})
+        self.assertEqual(h_get_outsider.code, 403)
+
+        # 4. Connected participant can serve and view the file
+        h_get = MockHandler(headers={"X-HWID": "hw_testuser"})
         self.file_controller.handle_serve_upload_get(h_get, serve_path, {})
         self.assertEqual(h_get.code, 200)
         # Verify strict security headers
