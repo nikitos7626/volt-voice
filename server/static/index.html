@@ -3241,8 +3241,8 @@
 
         const source = ctx.createMediaStreamSource(new MediaStream([mediaStreamTrack]));
         const analyser = ctx.createAnalyser();
-        analyser.fftSize = 32;
-        analyser.smoothingTimeConstant = 0.75;
+        analyser.fftSize = 128; // 64 bins (375 Hz per bin) - allows precise speech formant isolation
+        analyser.smoothingTimeConstant = 0.65;
         source.connect(analyser);
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -3294,36 +3294,46 @@
         allParticipants.forEach(p => {
           const identity = p.identity;
           const isLocal = p === currentRoom.localParticipant;
-          const isMuted = isLocal ? !currentRoom.localParticipant.isMicrophoneEnabled : false;
+          const isMuted = isLocal
+            ? (!currentRoom.localParticipant.isMicrophoneEnabled || btnMic.classList.contains('muted'))
+            : (p.audioTrackPublications ? !Array.from(p.audioTrackPublications.values()).some(pub => pub.track && !pub.isMuted) : false);
 
-          let v1 = 0, v2 = 0, v3 = 0, v4 = 0, avg = 0, maxVal = 0;
+          let v1 = 0, v2 = 0, v3 = 0, v4 = 0, vocalEnergy = 0, peakEnergy = 0;
           const analyserEntry = audioAnalysers.get(identity);
-          if (analyserEntry) {
+          if (analyserEntry && !isMuted) {
             const { analyser, dataArray } = analyserEntry;
             analyser.getByteFrequencyData(dataArray);
-            v1 = dataArray[0] || 0;
-            v2 = dataArray[1] || dataArray[2] || 0;
-            v3 = dataArray[2] || dataArray[4] || 0;
-            v4 = dataArray[3] || dataArray[6] || 0;
-            maxVal = Math.max(v1, v2, v3, v4);
-            avg = (v1 + v2 + v3 + v4) / 4;
+            // With fftSize=128 (375 Hz per bin):
+            // Bin 0 (0-375Hz) contains ground noise, USB ripple and DC bias on hardware-muted mics -> ignore bin 0!
+            // Bins 1..4 (375 Hz - 1875 Hz) contain true human vocal speech formants:
+            v1 = dataArray[1] || 0;
+            v2 = dataArray[2] || 0;
+            v3 = dataArray[3] || 0;
+            v4 = dataArray[4] || 0;
+            vocalEnergy = (v1 + v2 + v3 + v4) / 4;
+            peakEnergy = Math.max(v1, v2, v3, v4);
           }
 
-          // Dual-source voice detection: Web Audio frequency analysis OR server-side LiveKit isSpeaking
-          const serverSpeaking = Boolean(p.isSpeaking || (p.audioLevel && p.audioLevel > 0.015));
+          // True voice activity detection: requires real acoustic energy in human formant band (>20/255)
+          const serverSpeaking = Boolean(!isLocal && (p.isSpeaking || (p.audioLevel && p.audioLevel > 0.035)));
+          const acousticSpeaking = (vocalEnergy > 18 && peakEnergy > 26);
 
-          if ((maxVal > 8 || serverSpeaking) && !isMuted) {
+          if ((acousticSpeaking || serverSpeaking) && !isMuted) {
             speakingHoldTimes.set(identity, now);
           }
           const lastActive = speakingHoldTimes.get(identity) || 0;
-          const isSpeaking = (now - lastActive < 400) && !isMuted;
+          const isSpeaking = (now - lastActive < 380) && !isMuted;
+
+          if (isMuted) {
+            speakingHoldTimes.delete(identity);
+          }
 
           // Drive particle constellation smoothly
           if (window.triggerParticleVoiceEnergy && isSpeaking) {
-            window.triggerParticleVoiceEnergy(Math.max(avg, 25));
+            window.triggerParticleVoiceEnergy(Math.max(vocalEnergy, 25));
           }
           if (isLocal && micTestBar && !micTestActive) {
-            const pct = Math.min(100, Math.round((Math.max(avg, maxVal) / 100) * 100));
+            const pct = isMuted ? 0 : Math.min(100, Math.round((Math.max(vocalEnergy, peakEnergy) / 100) * 100));
             micTestBar.style.width = pct + '%';
             const lvl = document.getElementById('mic-test-level');
             if (lvl) lvl.textContent = pct + '%';
@@ -3333,16 +3343,17 @@
           const card = document.getElementById(`card-${identity}`);
           if (card) {
             card.classList.toggle('speaking', isSpeaking);
+            card.classList.toggle('muted', isMuted);
             const b1 = card.querySelector('.bar-1');
             const b2 = card.querySelector('.bar-2');
             const b3 = card.querySelector('.bar-3');
             const b4 = card.querySelector('.bar-4');
 
             if (!isMuted && isSpeaking) {
-              const h1 = Math.min(10, Math.max(4.0, (v1 / 255) * 10 || (Math.sin(now / 85) * 2.5 + 6.5)));
-              const h2 = Math.min(10, Math.max(5.0, (v2 / 255) * 10 || (Math.cos(now / 75) * 3.0 + 7.0)));
-              const h3 = Math.min(10, Math.max(4.0, (v3 / 255) * 10 || (Math.sin(now / 105) * 2.5 + 6.0)));
-              const h4 = Math.min(10, Math.max(4.5, (v4 / 255) * 10 || (Math.cos(now / 90) * 2.5 + 6.5)));
+              const h1 = Math.min(10, Math.max(2.5, (v1 / 255) * 11));
+              const h2 = Math.min(10, Math.max(2.5, (v2 / 255) * 12));
+              const h3 = Math.min(10, Math.max(2.5, (v3 / 255) * 11));
+              const h4 = Math.min(10, Math.max(2.5, (v4 / 255) * 10));
               if (b1) b1.style.height = h1 + 'px';
               if (b2) b2.style.height = h2 + 'px';
               if (b3) b3.style.height = h3 + 'px';
@@ -3726,8 +3737,12 @@
         btnMic.classList.add('muted');
         labelMic.textContent = 'БЕЗ ЗВУКА';
         if (currentRoom && currentRoom.localParticipant) {
+          speakingHoldTimes.delete(currentRoom.localParticipant.identity);
           const card = document.getElementById(`card-${currentRoom.localParticipant.identity}`);
-          if (card) card.classList.add('muted');
+          if (card) {
+            card.classList.add('muted');
+            card.classList.remove('speaking');
+          }
           const lbl = document.getElementById(`status-label-${currentRoom.localParticipant.identity}`);
           if (lbl) lbl.textContent = 'БЕЗ ЗВУКА';
         }
