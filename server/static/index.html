@@ -2674,7 +2674,7 @@
     </div>
 
     <!-- Login / Welcome Modal -->
-    <div class="modal-overlay" id="login-modal">
+    <div class="modal-overlay hidden" id="login-modal">
       <div class="modal-card">
         <div class="modal-header" style="text-align:center; margin-bottom:18px;">
           <div style="display:flex; justify-content:center; margin-bottom:10px;">
@@ -5266,13 +5266,29 @@
         const savedCallsign = localStorage.getItem('volt_callsign') || getCookie('volt_callsign');
 
         if (savedCallsign) {
-          console.log('[VOLT] Вход в приложение (Лобби):', savedCallsign);
+          console.log('[VOLT] Авто-вход пользователя в Лобби:', savedCallsign);
           const hwTag = document.getElementById('sidebar-hw-tag');
           if (hwTag) {
             hwTag.textContent = `💻 ${getDeviceName()}`;
             hwTag.title = `Привязано к оборудованию: ${getHardwareId()}`;
           }
           enterLobby(savedCallsign);
+        } else {
+          // If no local storage/cookie, check with server by hardware ID
+          const hw = getHardwareId();
+          fetch(`/api/session?hwid=${encodeURIComponent(hw)}`)
+            .then(r => r.json())
+            .then(res => {
+              if (res && res.ok && res.name) {
+                console.log('[VOLT] Авторизация по сохраненной сессии оборудования:', res.name);
+                enterLobby(res.name);
+              } else {
+                loginModal.classList.remove('hidden');
+              }
+            })
+            .catch(() => {
+              loginModal.classList.remove('hidden');
+            });
         }
       } catch(e) {
         console.warn('Session restore error:', e);
