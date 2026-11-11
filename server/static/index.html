@@ -4720,7 +4720,7 @@
                 <span class="chat-file-size">${sizeStr}</span>
               </div>
             </div>
-            <a href="${escapeHtml(fileSecUrl)}&download=1" download="${escapeHtml(file.name)}" class="chat-file-dl-btn">⬇ Скачать</a>
+            <button type="button" class="chat-file-dl-btn" onclick="downloadChatFile(event, '${escapeHtml(fileSecUrl)}&download=1', '${escapeHtml(file.name)}')">⬇ Скачать</button>
           `;
         }
         row.appendChild(fileDiv);
@@ -4739,6 +4739,64 @@
         });
       }
     }
+
+    async function downloadChatFile(event, url, filename) {
+      if (event) {
+        try { event.preventDefault(); event.stopPropagation(); } catch(e){}
+      }
+      showToast(`[ ⬇ ] Скачивание ${filename}...`);
+
+      const fullUrl = url.startsWith('http') ? url : (window.location.origin + url);
+      if (window.__VOLT_DESKTOP__ && typeof postDesktopIpc === 'function') {
+        postDesktopIpc(`download_file|${fullUrl}|${filename}`);
+      }
+
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        const blob = await resp.blob();
+
+        // 1. Native Windows Save As... Dialog (Chromium File System Access API)
+        if (typeof window.showSaveFilePicker === 'function') {
+          try {
+            const handle = await window.showSaveFilePicker({
+              suggestedName: filename
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            showToast(`[ ✓ ] Файл ${filename} успешно сохранён`);
+            return;
+          } catch (pickerErr) {
+            if (pickerErr && pickerErr.name === 'AbortError') {
+              return; // User clicked cancel
+            }
+          }
+        }
+
+        // 2. Fallback: Blob URL download via simulated <a> click
+        const blobUrl = window.URL.createObjectURL(blob);
+        const tempA = document.createElement('a');
+        tempA.style.display = 'none';
+        tempA.href = blobUrl;
+        tempA.download = filename;
+        document.body.appendChild(tempA);
+        tempA.click();
+        setTimeout(() => {
+          try {
+            document.body.removeChild(tempA);
+            window.URL.revokeObjectURL(blobUrl);
+          } catch(e){}
+        }, 3000);
+        showToast(`[ ✓ ] Файл ${filename} скачан`);
+      } catch (err) {
+        console.error('File download error:', err);
+        showToast(`[ ! ] Ошибка скачивания: ${err.message || 'Сбой'}`);
+      }
+    }
+    window.downloadChatFile = downloadChatFile;
 
     btnChatToggle.onclick = () => {
       const isHidden = chatPanel.classList.contains('hidden');
