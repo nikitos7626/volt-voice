@@ -17,6 +17,6 @@ OWNER_NAMES = {x.strip().lower() for x in os.environ.get("OWNER_NAMES", "").spli
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-EXE_VERSION = "1.2.0"
+EXE_VERSION = "1.3.0"
 DEFAULT_ROOM_ID = "lounge"
 DEFAULT_ROOM_NAME = "Основной канал"

@@ -133,7 +133,7 @@ volt-voice/
 ## 🖥 Десктоп-клиент для Windows (`VOLT.exe`)
 
 ### Вариант 1: Готовый бинарник (GitHub Releases)
-Скачайте **`VOLT-v1.2.0-windows-x64.exe`** из раздела [**Releases**](https://github.com/nikitos7626/volt-voice/releases/latest) (~760 КБ).
+Скачайте **`VOLT-v1.3.0-windows-x64.exe`** из раздела [**Releases**](https://github.com/nikitos7626/volt-voice/releases/latest) (~760 КБ).
 При первом запуске появится окно ввода адреса вашего сервера (также можно просто положить файл `volt_server.txt` с URL вашего сервера рядом с `.exe`).
 
 ### Вариант 2: Сборка из исходников под свой домен
