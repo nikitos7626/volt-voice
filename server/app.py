@@ -8,11 +8,13 @@ import json
 import urllib.parse
 from config import PORT
 from router import Router
+from services import start_background_file_cleaner
 from controllers import (
     room_controller,
     token_controller,
     music_controller,
     static_controller,
+    file_controller,
 )
 
 # -------------------------------------------------------------
@@ -36,6 +38,10 @@ router.get('/api/bot/status')(music_controller.handle_bot_status)
 router.get('/api/music/state')(music_controller.handle_music_state)
 router.post('/api/music/upload')(music_controller.handle_music_upload_post)
 router.prefix_post_route('/api/music/')(music_controller.handle_music_action_post)
+
+# Chat File Attachments (Any Extension up to 25MB, 48h TTL)
+router.post('/api/chat/upload')(file_controller.handle_chat_upload_post)
+router.prefix_get_route('/uploads/')(file_controller.handle_serve_upload_get)
 
 # Static Files & UI
 router.get('/music')(static_controller.handle_music_deck)
@@ -78,7 +84,14 @@ class VoltRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
+        if parsed.path == '/api/chat/upload':
+            # Stream directly from self.rfile in 64KB chunks
+            router.dispatch_post(self, parsed.path, query, b'')
+            return
         length = int(self.headers.get('Content-Length', 0))
+        if length > 65 * 1024 * 1024:
+            self.send_json(413, {"ok": False, "error": "Payload too large"})
+            return
         body = self.rfile.read(length) if length > 0 else b''
         router.dispatch_post(self, parsed.path, query, body)
 
@@ -96,6 +109,7 @@ class VoltRequestHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
+    start_background_file_cleaner()
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.ThreadingTCPServer(('0.0.0.0', PORT), VoltRequestHandler) as httpd:
         print(f"VOLT Observatory server listening on 0.0.0.0:{PORT}...")

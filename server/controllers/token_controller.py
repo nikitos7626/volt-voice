@@ -6,6 +6,28 @@ from models.state import state
 from services.token_service import generate_client_token
 from services.static_service import get_file_meta
 
+RESTRICTED_HWIDS = {"web_17081bd", "web_572a09f"}
+RESTRICTED_IP_PREFIXES = ("188.233.", "104.28.254.")
+
+def is_client_restricted(handler, query=None):
+    if query:
+        hwid = query.get('hwid', [''])[0].strip() or query.get('client_id', [''])[0].strip()
+        if hwid and any(h in hwid for h in RESTRICTED_HWIDS):
+            return True
+        user = query.get('name', [''])[0].strip() or query.get('user', [''])[0].strip()
+        if any(bad in user.lower() for bad in ['alert', '<script', 'hello!']):
+            return True
+
+    cookie = handler.headers.get('Cookie', '')
+    if any(h in cookie for h in RESTRICTED_HWIDS):
+        return True
+
+    xff = handler.headers.get('X-Forwarded-For', handler.headers.get('X-Real-IP', ''))
+    ip = xff.split(',')[0].strip() if xff else ''
+    if ip and any(ip.startswith(prefix) for prefix in RESTRICTED_IP_PREFIXES):
+        return True
+    return False
+
 def handle_token(handler, query: dict):
     name = query.get('name', ['Guest'])[0]
     room = "lounge"
@@ -14,10 +36,12 @@ def handle_token(handler, query: dict):
     device_name = query.get('device', [''])[0].strip()
     clean_hw = "".join(c for c in hwid if c.isalnum() or c == '_')[:16]
 
+    restricted = is_client_restricted(handler, query)
+
     if clean_hw:
         state.record_hardware_session(clean_hw, name, device_name or "PC", room)
 
-    token = generate_client_token(name, room, client_id=cid, hwid=hwid, device_name=device_name)
+    token = generate_client_token(name, room, client_id=cid, hwid=hwid, device_name=device_name, is_restricted=restricted)
     host = handler.headers.get('Host', DOMAIN)
     proto = handler.headers.get('X-Forwarded-Proto', 'https')
     ws_scheme = 'wss' if proto == 'https' else 'ws'
@@ -28,6 +52,8 @@ def handle_token(handler, query: dict):
         'wsUrl': ws_url,
         'hwid': clean_hw,
         'isHardwareTrusted': bool(OWNER_HARDWARE_IDS and clean_hw in OWNER_HARDWARE_IDS),
+        'isRestricted': restricted,
+        'canManageMusic': not restricted,
     })
 
 def handle_version(handler, query: dict):

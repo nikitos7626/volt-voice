@@ -17,6 +17,10 @@ OWNER_NAMES = {x.strip().lower() for x in os.environ.get("OWNER_NAMES", "").spli
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
+UPLOAD_DIR = os.environ.get("VOLT_UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
+MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB max per file
+FILE_TTL_SECONDS = 48 * 3600  # 48 hours rolling retention
+MAX_STORAGE_CAP_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB total uploads quota
 EXE_VERSION = "1.3.0"
 DEFAULT_ROOM_ID = "lounge"
 DEFAULT_ROOM_NAME = "Основной канал"

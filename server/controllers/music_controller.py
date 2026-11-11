@@ -9,21 +9,34 @@ from services.music_proxy import (
     forward_music_action,
     save_and_forward_upload,
 )
+from controllers.token_controller import is_client_restricted
 
 def handle_bot_status(handler, query: dict):
+    if is_client_restricted(handler, query):
+        handler.send_json(403, {"ok": False, "error": "Доступ к статусу бота ограничен"})
+        return
     code, raw = query_bot_status()
     handler.send_raw(code, 'application/json', raw)
 
 def handle_music_state(handler, query: dict):
+    if is_client_restricted(handler, query):
+        handler.send_json(403, {"ok": False, "error": "Доступ к плееру ограничен"})
+        return
     code, raw = query_music_state()
     handler.send_raw(code, 'application/json', raw)
 
 def handle_music_action_post(handler, path: str, query: dict, body: bytes):
+    if is_client_restricted(handler, query):
+        handler.send_json(403, {"ok": False, "error": "Управление музыкой запрещено"})
+        return
     action = path[len('/api/music/'):].strip('/')
     code, raw = forward_music_action(action, body or b'{}')
     handler.send_raw(code, 'application/json', raw)
 
 def handle_music_upload_post(handler, query: dict, body: bytes):
+    if is_client_restricted(handler, query):
+        handler.send_json(403, {"ok": False, "error": "Загрузка музыки запрещена"})
+        return
     try:
         length = len(body)
         if length <= 0 or length > 60 * 1024 * 1024:

@@ -9,6 +9,9 @@ __pycache__/
 .venv/
 venv/
 uploads/
+server/uploads/
+*_backup*
+*backup*
 
 # Rust / Desktop Builds
 desktop/*/target/

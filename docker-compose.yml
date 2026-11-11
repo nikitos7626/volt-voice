@@ -41,6 +41,8 @@ services:
       - OWNER_NAMES=${OWNER_NAMES}
     depends_on:
       - livekit
+    volumes:
+      - volt_uploads:/app/uploads
 
   volt-bot:
     build: ./music-bot
@@ -56,3 +58,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  volt_uploads:

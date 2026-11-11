@@ -178,6 +178,22 @@ class MusicController:
                 sender = parsed.get("sender", "")
                 if "[BOT]" in sender or "[MUSIC]" in sender:
                     return
+
+                # Security: drop music shortcuts from restricted clients
+                if data.participant:
+                    part = data.participant
+                    ident = getattr(part, 'identity', '') or ''
+                    if any(bad in ident for bad in ('web_17081bd', 'web_572a09f', 'alert')):
+                        print(f"[SECURITY] Dropped music command from restricted participant: {ident}")
+                        return
+                    try:
+                        m = json.loads(getattr(part, 'metadata', '') or '{}')
+                        if m.get('can_manage_music') is False or m.get('is_restricted'):
+                            print(f"[SECURITY] Dropped music command from restricted participant: {ident}")
+                            return
+                    except Exception:
+                        pass
+
                 text = (parsed.get("text") or "").strip()
                 lower = text.lower()
                 if lower.startswith("/play ") or lower.startswith("/radio ") or lower in ("/stop", "/next"):

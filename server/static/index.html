@@ -712,6 +712,131 @@
       border: 1px dashed var(--graphite);
       letter-spacing: 0.04em;
     }
+    .chat-attach-btn {
+      width: 38px;
+      height: 38px;
+      background: var(--void-black);
+      border: 1px solid var(--graphite);
+      color: var(--ash);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+    .chat-attach-btn:hover {
+      border-color: var(--reactor-lime);
+      color: var(--reactor-lime);
+      background: rgba(235, 251, 16, 0.08);
+    }
+    .chat-sidebar.drag-over {
+      outline: 2px dashed var(--reactor-lime) !important;
+      outline-offset: -3px;
+      background: rgba(235, 251, 16, 0.04) !important;
+    }
+    .chat-upload-bar {
+      height: 3px;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      display: none;
+    }
+    .chat-upload-progress {
+      height: 100%;
+      width: 0%;
+      background: var(--reactor-lime);
+      box-shadow: 0 0 8px var(--reactor-lime);
+      transition: width 0.1s linear;
+    }
+    .chat-media-preview {
+      margin-top: 6px;
+      max-width: 100%;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+      background: #000;
+      display: block;
+    }
+    .chat-img-thumb {
+      max-width: 100%;
+      max-height: 220px;
+      object-fit: cover;
+      display: block;
+      cursor: zoom-in;
+      transition: transform 0.15s ease;
+    }
+    .chat-img-thumb:hover {
+      transform: scale(1.015);
+    }
+    .chat-video-player {
+      max-width: 100%;
+      max-height: 240px;
+      display: block;
+      border-radius: 8px;
+      outline: none;
+      background: #000;
+    }
+    .chat-file-card {
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: rgba(16, 16, 20, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    .chat-file-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+      min-width: 0;
+    }
+    .chat-file-icon {
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .chat-file-meta {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .chat-file-name {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--frost);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .chat-file-size {
+      font-size: 9.5px;
+      color: var(--slate);
+      font-family: var(--font-mono);
+    }
+    .chat-file-dl-btn {
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(235, 251, 16, 0.12);
+      border: 1px solid rgba(235, 251, 16, 0.4);
+      color: var(--reactor-lime);
+      font-size: 10px;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+    .chat-file-dl-btn:hover {
+      background: var(--reactor-lime);
+      color: #000;
+    }
     .chat-input-bar {
       padding: 10px 12px;
       border-top: 1px solid var(--graphite);
@@ -2351,8 +2476,11 @@
           <span class="chat-close-btn" id="btn-close-chat" title="Закрыть чат">[ × ]</span>
         </div>
         <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-upload-bar" id="chat-upload-bar"><div class="chat-upload-progress" id="chat-upload-progress"></div></div>
         <form class="chat-input-bar" id="chat-form">
-          <input type="text" class="chat-input" id="chat-input" placeholder="Написать в чат..." autocomplete="off"/>
+          <input type="file" id="chat-file-input" style="display:none;" />
+          <button type="button" class="chat-attach-btn" id="btn-chat-attach" title="Прикрепить файл (до 25 МБ)">📎</button>
+          <input type="text" class="chat-input" id="chat-input" placeholder="Написать или вставить файл (Ctrl+V)..." autocomplete="off"/>
           <button type="submit" class="chat-send-btn" id="btn-send-msg" title="Отправить (Enter)">↵</button>
         </form>
       </aside>
@@ -2921,6 +3049,18 @@
           const data = await resp.json();
           token = data.token;
           wsUrl = data.wsUrl || wsUrl;
+          if (data.isRestricted || data.canManageMusic === false) {
+            window.__VOLT_RESTRICTED__ = true;
+            const btnMusic = document.getElementById('btn-sidebar-music');
+            if (btnMusic) btnMusic.style.display = 'none';
+            const attachBtn = document.getElementById('btn-chat-attach');
+            if (attachBtn) {
+              attachBtn.disabled = true;
+              attachBtn.title = "Прикрепление файлов ограничено";
+              attachBtn.style.opacity = '0.35';
+              attachBtn.style.cursor = 'not-allowed';
+            }
+          }
         }
 
         if (lobbyDesc) lobbyDesc.textContent = 'Установка сессии WebRTC / DTLS...';
@@ -3124,12 +3264,13 @@
             const decoder = new TextDecoder();
             const data = JSON.parse(decoder.decode(payload));
             if (data.type === 'chat') {
-              appendChatMessage(data.sender, data.text, data.time, false);
+              appendChatMessage(data.sender, data.text, data.time, false, data.file);
               if (chatPanel.classList.contains('hidden')) {
                 unreadChatCount++;
                 chatBadge.textContent = unreadChatCount;
                 chatBadge.classList.remove('hidden');
-                showToast(`[ 💬 ] ${data.sender}: ${data.text.slice(0, 30)}`);
+                const previewSnippet = data.text ? data.text.slice(0, 30) : (data.file ? `[Файл] ${data.file.name}` : '');
+                showToast(`[ 💬 ] ${data.sender}: ${previewSnippet}`);
               }
             }
           } catch (err) {
@@ -3340,7 +3481,7 @@
           }
 
           // 1. Update speaker card
-          const card = document.getElementById(`card-${identity}`);
+          const card = document.getElementById(`card-${safeDomId(identity)}`);
           if (card) {
             card.classList.toggle('speaking', isSpeaking);
             card.classList.toggle('muted', isMuted);
@@ -3365,7 +3506,7 @@
               if (b4) b4.style.height = '2.5px';
             }
 
-            const statusLabel = document.getElementById(`status-label-${identity}`);
+            const statusLabel = document.getElementById(`status-label-${safeDomId(identity)}`);
             if (statusLabel) {
               if (isMuted) {
                 statusLabel.textContent = 'БЕЗ ЗВУКА';
@@ -3376,10 +3517,10 @@
           }
 
           // 2. Update sidebar
-          const row = document.getElementById(`user-${identity}`);
+          const row = document.getElementById(`user-${safeDomId(identity)}`);
           if (row) {
             row.classList.toggle('speaking', isSpeaking);
-            const tag = document.getElementById(`tag-${identity}`);
+            const tag = document.getElementById(`tag-${safeDomId(identity)}`);
             if (tag) tag.textContent = isMuted ? 'БЕЗ ЗВУКА' : (isSpeaking ? 'ГОВОРИТ' : 'ВКЛ');
           }
         });
@@ -3391,9 +3532,9 @@
 
     function setParticipantSpeaking(identity, isSpeaking) {
       if (audioAnalysers.has(identity)) return;
-      const row = document.getElementById(`user-${identity}`);
+      const row = document.getElementById(`user-${safeDomId(identity)}`);
       if (row) row.classList.toggle('speaking', isSpeaking);
-      const card = document.getElementById(`card-${identity}`);
+      const card = document.getElementById(`card-${safeDomId(identity)}`);
       if (card) card.classList.toggle('speaking', isSpeaking);
     }
 
@@ -3462,17 +3603,18 @@
       return 100;
     }
 
-    function handleParticipantVolumeChange(identity, value) {
+    function handleParticipantVolumeChange(encodedIdentity, value) {
+      const identity = decodeURIComponent(encodedIdentity);
       const numVal = parseInt(value, 10);
       participantVolumes.set(identity, numVal);
       try {
         localStorage.setItem(`volt_vol_${identity}`, numVal);
       } catch(e){}
 
-      const valSpan = document.getElementById(`vol-val-${identity}`);
+      const valSpan = document.getElementById(`vol-val-${safeDomId(identity)}`);
       if (valSpan) valSpan.textContent = `${numVal}%`;
 
-      const iconSpan = document.getElementById(`vol-icon-${identity}`);
+      const iconSpan = document.getElementById(`vol-icon-${safeDomId(identity)}`);
       if (iconSpan) {
         iconSpan.textContent = numVal === 0 ? '🔇' : (numVal > 100 ? '🔊' : '🔉');
       }
@@ -3519,12 +3661,12 @@
           const displayName = name.replace('[BOT]', '').replace('[MUSIC]', '').trim();
           const botBadge = name.includes('[MUSIC]') ? '<span class="bot-badge">[ ПЛЕЕР ]</span>' : (name.includes('[BOT]') ? '<span class="bot-badge">[ БОТ ]</span>' : '');
           return `
-            <div class="user-row ${isBot ? 'bot-row' : ''}" id="user-${p.identity}">
+            <div class="user-row ${isBot ? 'bot-row' : ''}" id="user-${safeDomId(p.identity)}">
               <span>
                 [ ${num} ] ${escapeHtml(displayName)} ${botBadge} ${isMe ? '(ВЫ)' : ''}
-                ${activeStreams.has(p.identity) ? `<span class="sidebar-live-tag" onclick="watchStream('${p.identity}')" title="Смотреть стрим">🔴 СТРИМ</span>` : ''}
+                ${activeStreams.has(p.identity) ? `<span class="sidebar-live-tag" onclick="watchStream('${encodeURIComponent(p.identity)}')" title="Смотреть стрим">🔴 СТРИМ</span>` : ''}
               </span>
-              <span class="user-tag" id="tag-${p.identity}">${isBot ? 'СИСТЕМА' : 'ВКЛ'}</span>
+              <span class="user-tag" id="tag-${safeDomId(p.identity)}">${isBot ? 'СИСТЕМА' : 'ВКЛ'}</span>
             </div>
           `;
         }).join('');
@@ -3542,7 +3684,7 @@
         const badgeLabel = isMusic ? 'ПЛЕЕР' : 'БОТ';
         const statusText = isMusic ? 'HI-FI ПОТОК' : (isBot ? 'АВТОНОМНЫЙ' : 'МИКРОФОН ВКЛ');
         return `
-          <div class="speaker-card ${isBot ? 'bot-card' : ''}" id="card-${p.identity}">
+          <div class="speaker-card ${isBot ? 'bot-card' : ''}" id="card-${safeDomId(p.identity)}">
             <div class="avatar-wrapper">
               ${(() => {
                 try {
@@ -3574,18 +3716,18 @@
               ${activeStreams.has(p.identity) ? '<span class="stream-live-badge">🔴 СТРИМ</span>' : ''}
             </div>
             <div class="speaker-status-row">
-              <span class="status-label" id="status-label-${p.identity}">${statusText}</span>
+              <span class="status-label" id="status-label-${safeDomId(p.identity)}">${statusText}</span>
             </div>
             ${!isMe ? `
               <div class="speaker-volume-control" title="Громкость (${getParticipantVolume(p.identity)}%)">
-                <span class="vol-icon" id="vol-icon-${p.identity}">🔊</span>
+                <span class="vol-icon" id="vol-icon-${safeDomId(p.identity)}">🔊</span>
                 <input type="range" class="vol-slider" min="0" max="200" value="${getParticipantVolume(p.identity)}"
-                       oninput="handleParticipantVolumeChange('${p.identity}', this.value)"/>
-                <span class="vol-value" id="vol-val-${p.identity}">${getParticipantVolume(p.identity)}%</span>
+                       oninput="handleParticipantVolumeChange('${encodeURIComponent(p.identity)}', this.value)"/>
+                <span class="vol-value" id="vol-val-${safeDomId(p.identity)}">${getParticipantVolume(p.identity)}%</span>
               </div>
             ` : ''}
             ${activeStreams.has(p.identity) ? `
-              <button type="button" class="btn-watch-stream" onclick="watchStream('${p.identity}')" title="Открыть трансляцию">
+              <button type="button" class="btn-watch-stream" onclick="watchStream('${encodeURIComponent(p.identity)}')" title="Открыть трансляцию">
                 <span>📺 СМОТРЕТЬ СТРИМ</span>
               </button>
             ` : ''}
@@ -3595,8 +3737,8 @@
 
       // Sync initial local card mute state
       if (currentRoom && currentRoom.localParticipant && !currentRoom.localParticipant.isMicrophoneEnabled) {
-        const myCard = document.getElementById(`card-${currentRoom.localParticipant.identity}`);
-        const myStatus = document.getElementById(`status-label-${currentRoom.localParticipant.identity}`);
+        const myCard = document.getElementById(`card-${safeDomId(currentRoom.localParticipant.identity)}`);
+        const myStatus = document.getElementById(`status-label-${safeDomId(currentRoom.localParticipant.identity)}`);
         if (myCard) myCard.classList.add('muted');
         if (myStatus) myStatus.textContent = 'БЕЗ ЗВУКА';
       }
@@ -3728,9 +3870,9 @@
         labelMic.textContent = 'МИКРОФОН';
         hideBanner();
         if (currentRoom && currentRoom.localParticipant) {
-          const card = document.getElementById(`card-${currentRoom.localParticipant.identity}`);
+          const card = document.getElementById(`card-${safeDomId(currentRoom.localParticipant.identity)}`);
           if (card) card.classList.remove('muted');
-          const lbl = document.getElementById(`status-label-${currentRoom.localParticipant.identity}`);
+          const lbl = document.getElementById(`status-label-${safeDomId(currentRoom.localParticipant.identity)}`);
           if (lbl) lbl.textContent = 'МИКРОФОН ВКЛ';
         }
       } else {
@@ -3738,12 +3880,12 @@
         labelMic.textContent = 'БЕЗ ЗВУКА';
         if (currentRoom && currentRoom.localParticipant) {
           speakingHoldTimes.delete(currentRoom.localParticipant.identity);
-          const card = document.getElementById(`card-${currentRoom.localParticipant.identity}`);
+          const card = document.getElementById(`card-${safeDomId(currentRoom.localParticipant.identity)}`);
           if (card) {
             card.classList.add('muted');
             card.classList.remove('speaking');
           }
-          const lbl = document.getElementById(`status-label-${currentRoom.localParticipant.identity}`);
+          const lbl = document.getElementById(`status-label-${safeDomId(currentRoom.localParticipant.identity)}`);
           if (lbl) lbl.textContent = 'БЕЗ ЗВУКА';
         }
       }
@@ -4398,7 +4540,39 @@
 
     
 
-    function appendChatMessage(sender, text, time, isSelf) {
+    function formatBytes(bytes) {
+      if (!bytes || bytes <= 0) return '0 Б';
+      const k = 1024;
+      const dm = 1;
+      const sizes = ['Б', 'КБ', 'МБ', 'ГБ'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    function getFileIcon(filename) {
+      const ext = (filename || '').split('.').pop().toLowerCase();
+      if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '📦';
+      if (['pdf', 'doc', 'docx', 'txt', 'rtf', 'odt', 'csv', 'xlsx'].includes(ext)) return '📄';
+      if (['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'].includes(ext)) return '🎵';
+      if (['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext)) return '🎬';
+      if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return '🖼️';
+      if (['exe', 'bat', 'cmd', 'ps1', 'sh', 'py', 'rs', 'js', 'json', 'toml'].includes(ext)) return '⚙️';
+      return '📎';
+    }
+
+    function safeDomId(id) {
+      if (!id) return 'empty';
+      let h = 0;
+      const str = String(id);
+      for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h) + str.charCodeAt(i);
+        h |= 0;
+      }
+      const slug = str.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 16);
+      return `${slug}_${Math.abs(h).toString(36)}`;
+    }
+
+    function appendChatMessage(sender, text, time, isSelf, file) {
       const row = document.createElement('div');
       row.className = 'chat-msg-row';
 
@@ -4417,13 +4591,40 @@
 
       header.appendChild(senderSpan);
       header.appendChild(timeSpan);
-
-      const textDiv = document.createElement('div');
-      textDiv.className = 'chat-msg-text';
-      textDiv.textContent = text;
-
       row.appendChild(header);
-      row.appendChild(textDiv);
+
+      if (text) {
+        const textDiv = document.createElement('div');
+        textDiv.className = 'chat-msg-text';
+        textDiv.textContent = text;
+        row.appendChild(textDiv);
+      }
+
+      if (file && file.url) {
+        const fileDiv = document.createElement('div');
+        if (file.is_image) {
+          fileDiv.className = 'chat-media-preview';
+          fileDiv.innerHTML = `<img src="${escapeHtml(file.url)}" class="chat-img-thumb" alt="${escapeHtml(file.name || 'image')}" onclick="window.open('${escapeHtml(file.url)}', '_blank')" title="Открыть в полном размере"/>`;
+        } else if (file.is_video) {
+          fileDiv.className = 'chat-media-preview';
+          fileDiv.innerHTML = `<video controls class="chat-video-player" src="${escapeHtml(file.url)}"></video>`;
+        } else {
+          fileDiv.className = 'chat-file-card';
+          const icon = getFileIcon(file.name);
+          const sizeStr = formatBytes(file.size);
+          fileDiv.innerHTML = `
+            <div class="chat-file-info">
+              <span class="chat-file-icon">${icon}</span>
+              <div class="chat-file-meta">
+                <span class="chat-file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+                <span class="chat-file-size">${sizeStr}</span>
+              </div>
+            </div>
+            <a href="${escapeHtml(file.url)}?download=1" download="${escapeHtml(file.name)}" class="chat-file-dl-btn">⬇ Скачать</a>
+          `;
+        }
+        row.appendChild(fileDiv);
+      }
 
       chatMessages.appendChild(row);
       chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -4457,6 +4658,125 @@
       chatPanel.classList.add('hidden');
       btnChatToggle.classList.remove('active');
     };
+
+    const chatFileInput = document.getElementById('chat-file-input');
+    const btnChatAttach = document.getElementById('btn-chat-attach');
+    const chatUploadBar = document.getElementById('chat-upload-bar');
+    const chatUploadProgress = document.getElementById('chat-upload-progress');
+
+    let isUploadingFile = false;
+
+    async function uploadAndSendFile(file) {
+      if (!file) return;
+      if (!currentRoom) {
+        showToast('[ ! ] Сначала войдите в голосовой канал');
+        return;
+      }
+      if (file.size > 25 * 1024 * 1024) {
+        showToast('[ ! ] Файл слишком большой. Максимум 25 МБ');
+        return;
+      }
+      if (isUploadingFile) {
+        showToast('[ ! ] Дождитесь окончания текущей загрузки');
+        return;
+      }
+
+      isUploadingFile = true;
+      if (chatUploadBar) chatUploadBar.style.display = 'block';
+      if (chatUploadProgress) chatUploadProgress.style.width = '25%';
+
+      try {
+        const resp = await fetch('/api/chat/upload', {
+          method: 'POST',
+          headers: {
+            'X-Filename': encodeURIComponent(file.name)
+          },
+          body: file
+        });
+
+        if (chatUploadProgress) chatUploadProgress.style.width = '85%';
+        const data = await resp.json();
+
+        if (!data.ok || !data.file) {
+          throw new Error(data.error || 'Ошибка загрузки файла');
+        }
+
+        if (chatUploadProgress) chatUploadProgress.style.width = '100%';
+
+        const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        const sender = currentRoom.localParticipant.name || currentRoom.localParticipant.identity;
+        const caption = chatInput.value.trim();
+
+        const msg = {
+          type: 'chat',
+          sender: sender,
+          text: caption,
+          time: time,
+          file: data.file
+        };
+
+        const encoder = new TextEncoder();
+        const payload = encoder.encode(JSON.stringify(msg));
+        await currentRoom.localParticipant.publishData(payload, { reliable: true });
+
+        appendChatMessage(sender, caption, time, true, data.file);
+        chatInput.value = '';
+        showToast(`[ 📎 ] Файл ${file.name} отправлен`);
+      } catch (err) {
+        console.error('File upload error:', err);
+        showToast(`[ ! ] ${err.message || 'Ошибка отправки файла'}`);
+      } finally {
+        isUploadingFile = false;
+        if (chatFileInput) chatFileInput.value = '';
+        setTimeout(() => {
+          if (chatUploadBar) chatUploadBar.style.display = 'none';
+          if (chatUploadProgress) chatUploadProgress.style.width = '0%';
+        }, 300);
+      }
+    }
+
+    if (btnChatAttach && chatFileInput) {
+      btnChatAttach.onclick = () => chatFileInput.click();
+      chatFileInput.onchange = () => {
+        if (chatFileInput.files && chatFileInput.files[0]) {
+          uploadAndSendFile(chatFileInput.files[0]);
+        }
+      };
+    }
+
+    if (chatPanel) {
+      ['dragenter', 'dragover'].forEach(evt => {
+        chatPanel.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          chatPanel.classList.add('drag-over');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach(evt => {
+        chatPanel.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          chatPanel.classList.remove('drag-over');
+        });
+      });
+
+      chatPanel.addEventListener('drop', (e) => {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+          uploadAndSendFile(e.dataTransfer.files[0]);
+        }
+      });
+    }
+
+    if (chatInput) {
+      chatInput.addEventListener('paste', (e) => {
+        if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+          const file = e.clipboardData.files[0];
+          e.preventDefault();
+          uploadAndSendFile(file);
+        }
+      });
+    }
 
     chatForm.onsubmit = async (e) => {
       e.preventDefault();
@@ -4518,6 +4838,10 @@
 
       function openMusicDeck() {
         if (!musicModal) return;
+        if (window.__VOLT_RESTRICTED__) {
+          showToast('[ ! ] Доступ к управлению музыкой ограничен');
+          return;
+        }
         if (musicIframe && (!musicIframe.src || musicIframe.src === 'about:blank' || musicIframe.src.endsWith('about:blank'))) {
           musicIframe.src = '/music';
         }
