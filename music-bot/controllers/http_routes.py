@@ -50,6 +50,9 @@ def build_routes(ctrl: MusicController) -> web.RouteTableDef:
             item = await ctrl.resolver.resolve_query_to_item(data['query'])
         if not item:
             return web.json_response({"ok": False, "error": "Трек не найден"})
+        from services.track_resolver import parse_duration_to_seconds
+        if parse_duration_to_seconds(item.get("duration", "")) > 3600 and not item.get("is_radio"):
+            return web.json_response({"ok": False, "error": "Треки длиннее 60 минут запрещены для защиты сервера"})
         if 'id' not in item:
             item['id'] = uuid.uuid4().hex[:8]
         ok = await ctrl.play_item(item)
@@ -66,6 +69,9 @@ def build_routes(ctrl: MusicController) -> web.RouteTableDef:
             item = await ctrl.resolver.resolve_query_to_item(data['query'])
         if not item:
             return web.json_response({"ok": False, "error": "Трек не найден"})
+        from services.track_resolver import parse_duration_to_seconds
+        if parse_duration_to_seconds(item.get("duration", "")) > 3600 and not item.get("is_radio"):
+            return web.json_response({"ok": False, "error": "Треки длиннее 60 минут запрещены для защиты сервера"})
         if 'id' not in item:
             item['id'] = uuid.uuid4().hex[:8]
         if not ctrl.state.is_playing:

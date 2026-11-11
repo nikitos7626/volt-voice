@@ -10,6 +10,22 @@ import uuid
 from config import RADIO_STATIONS
 
 
+def parse_duration_to_seconds(dur_str: str) -> int:
+    if not dur_str or dur_str in ("—", "NA", "LIVE"):
+        return 0
+    parts = dur_str.strip().split(":")
+    try:
+        if len(parts) == 1:
+            return int(parts[0])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        elif len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except Exception:
+        pass
+    return 0
+
+
 def _parse_metadata_from_html(url: str) -> str | None:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -71,6 +87,8 @@ class TrackResolver:
                     if len(parts) >= 3:
                         t, dur, url = parts[0].strip(), parts[1].strip(), parts[2].strip()
                         uploader = parts[3].strip() if len(parts) > 3 else ""
+                        if parse_duration_to_seconds(dur) > 3600:
+                            continue
                         if "/watch?v=" in url and dur and dur != "NA":
                             results.append({
                                 "id": uuid.uuid4().hex[:8],
