@@ -677,17 +677,24 @@
       font-size: 11.5px;
       line-height: 1.4;
       word-break: break-word;
+      overflow: hidden;
+      max-width: 100%;
     }
     .chat-msg-header {
       display: flex;
       align-items: center;
       gap: 8px;
       font-size: 10px;
+      overflow: hidden;
     }
     .chat-msg-sender {
       font-weight: 600;
       color: var(--reactor-lime);
       letter-spacing: 0.04em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 160px;
     }
     .chat-msg-sender.self {
       color: #57F287;
@@ -696,13 +703,21 @@
       color: var(--slate);
       font-family: var(--font-mono);
       font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
     }
     .chat-msg-text {
       color: var(--frost);
       background: rgba(24, 24, 27, 0.6);
       border: 1px solid var(--graphite);
       padding: 6px 10px;
-      border-radius: 2px;
+      border-radius: 4px;
+      overflow: hidden;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      white-space: pre-wrap;
+      max-height: 220px;
+      overflow-y: auto;
+      line-height: 1.45;
     }
     .chat-system-msg {
       font-size: 9.5px;
@@ -3264,13 +3279,20 @@
             const decoder = new TextDecoder();
             const data = JSON.parse(decoder.decode(payload));
             if (data.type === 'chat') {
-              appendChatMessage(data.sender, data.text, data.time, false, data.file);
+              const rawSender = (participant && (participant.name || participant.identity))
+                ? (participant.name || participant.identity).replace(/_[a-f0-9]{4,}$/i, '')
+                : (data.sender || 'Участник');
+              const safeSender = cleanChatSender(rawSender);
+              const cleanText = stripZalgo(data.text);
+              if (!cleanText && !data.file) return;
+
+              appendChatMessage(safeSender, cleanText, data.time, false, data.file);
               if (chatPanel.classList.contains('hidden')) {
                 unreadChatCount++;
                 chatBadge.textContent = unreadChatCount;
                 chatBadge.classList.remove('hidden');
-                const previewSnippet = data.text ? data.text.slice(0, 30) : (data.file ? `[Файл] ${data.file.name}` : '');
-                showToast(`[ 💬 ] ${data.sender}: ${previewSnippet}`);
+                const previewSnippet = cleanText ? cleanText.slice(0, 30) : (data.file ? `[Файл] ${data.file.name}` : '');
+                showToast(`[ 💬 ] ${safeSender}: ${previewSnippet}`);
               }
             }
           } catch (err) {
@@ -4572,7 +4594,30 @@
       return `${slug}_${Math.abs(h).toString(36)}`;
     }
 
+    function stripZalgo(str) {
+      if (!str) return '';
+      return String(str)
+        // Strip Unicode combining diacritics (Zalgo marks)
+        .replace(/[\u0300-\u036F\u0483-\u0489\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]/g, '')
+        // Strip zero-width, invisible, and control characters
+        .replace(/[\u200B-\u200D\uFEFF\u0000-\u0008\u000E-\u001F]/g, '')
+        // Collapse 3+ newlines to max 2
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    }
+
+    function cleanChatSender(rawSender) {
+      if (!rawSender) return 'Участник';
+      const noZalgo = stripZalgo(rawSender);
+      const safe = noZalgo.replace(/<[^>]*>/g, '').replace(/[\r\n\t"\'<>{}\\\/`]/g, '').trim();
+      return safe.slice(0, 24) || 'Участник';
+    }
+
     function appendChatMessage(sender, text, time, isSelf, file) {
+      const sanitizedText = stripZalgo(text);
+      if (!sanitizedText && !file) return;
+
+      const safeSender = cleanChatSender(sender);
       const row = document.createElement('div');
       row.className = 'chat-msg-row';
 
@@ -4580,8 +4625,8 @@
       header.className = 'chat-msg-header';
 
       const senderSpan = document.createElement('span');
-      const isBot = sender.includes('[BOT]');
-      const cleanSender = isBot ? sender.replace('[BOT]', '').trim() : sender;
+      const isBot = safeSender.includes('[BOT]');
+      const cleanSender = isBot ? safeSender.replace('[BOT]', '').trim() : safeSender;
       senderSpan.className = 'chat-msg-sender' + (isSelf ? ' self' : '') + (isBot ? ' bot' : '');
       senderSpan.innerHTML = (isSelf ? `${escapeHtml(cleanSender)} (ВЫ)` : escapeHtml(cleanSender)) + (isBot ? ' <span class="bot-badge-chat">[ БОТ ]</span>' : '');
 
@@ -4593,10 +4638,10 @@
       header.appendChild(timeSpan);
       row.appendChild(header);
 
-      if (text) {
+      if (sanitizedText) {
         const textDiv = document.createElement('div');
         textDiv.className = 'chat-msg-text';
-        textDiv.textContent = text;
+        textDiv.textContent = sanitizedText;
         row.appendChild(textDiv);
       }
 
@@ -4780,11 +4825,13 @@
 
     chatForm.onsubmit = async (e) => {
       e.preventDefault();
-      const text = chatInput.value.trim();
+      const rawText = chatInput.value;
+      const text = stripZalgo(rawText);
       if (!text || !currentRoom) return;
 
       const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-      const sender = currentRoom.localParticipant.name || currentRoom.localParticipant.identity;
+      const rawSender = currentRoom.localParticipant.name || currentRoom.localParticipant.identity;
+      const sender = cleanChatSender(rawSender);
 
       const msg = {
         type: 'chat',
