@@ -38,8 +38,9 @@ def generate_client_token(name: str, room: str, client_id: str = "", hwid: str =
     if not clean_hw:
         clean_hw = hex(random.randint(0x1000, 0xFFFF))[2:]
 
-    # Clean any dangerous quotes, brackets, or injection characters
-    clean_name = re.sub(r'[\r\n\t"\'<>{}\\\/`]', '', name).strip()[:24]
+    # Strict whitelist: Russian/English alphanumeric, spaces, hyphens, dots and underscores only
+    clean_name = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ _\-\.]', '', name).strip()
+    clean_name = re.sub(r'\s+', ' ', clean_name)[:20]
     if not clean_name:
         clean_name = "Участник"
 

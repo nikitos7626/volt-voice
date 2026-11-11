@@ -715,7 +715,7 @@
       overflow-wrap: break-word;
       word-break: break-word;
       white-space: pre-wrap;
-      max-height: 220px;
+      max-height: 140px;
       overflow-y: auto;
       line-height: 1.45;
     }
@@ -2495,7 +2495,7 @@
         <form class="chat-input-bar" id="chat-form">
           <input type="file" id="chat-file-input" style="display:none;" />
           <button type="button" class="chat-attach-btn" id="btn-chat-attach" title="Прикрепить файл (до 25 МБ)">📎</button>
-          <input type="text" class="chat-input" id="chat-input" placeholder="Написать или вставить файл (Ctrl+V)..." autocomplete="off"/>
+          <input type="text" class="chat-input" id="chat-input" maxlength="500" placeholder="Написать в чат (до 500 симв)..." autocomplete="off"/>
           <button type="submit" class="chat-send-btn" id="btn-send-msg" title="Отправить (Enter)">↵</button>
         </form>
       </aside>
@@ -3279,11 +3279,15 @@
             const decoder = new TextDecoder();
             const data = JSON.parse(decoder.decode(payload));
             if (data.type === 'chat') {
+              const senderKey = (participant && participant.identity) || data.sender || 'unknown';
+              if (isChatSpamming(senderKey)) {
+                return; // Drop rapid spam flood
+              }
               const rawSender = (participant && (participant.name || participant.identity))
                 ? (participant.name || participant.identity).replace(/_[a-f0-9]{4,}$/i, '')
                 : (data.sender || 'Участник');
               const safeSender = cleanChatSender(rawSender);
-              const cleanText = stripZalgo(data.text);
+              const cleanText = sanitizeChatMessage(data.text);
               if (!cleanText && !data.file) return;
 
               appendChatMessage(safeSender, cleanText, data.time, false, data.file);
@@ -3680,7 +3684,7 @@
           const num = String(idx + 1).padStart(2, '0');
           const name = p.name || p.identity;
           const isBot = name.includes('[BOT]') || name.includes('[MUSIC]');
-          const displayName = name.replace('[BOT]', '').replace('[MUSIC]', '').trim();
+          const displayName = cleanChatSender(name.replace('[BOT]', '').replace('[MUSIC]', '').trim());
           const botBadge = name.includes('[MUSIC]') ? '<span class="bot-badge">[ ПЛЕЕР ]</span>' : (name.includes('[BOT]') ? '<span class="bot-badge">[ БОТ ]</span>' : '');
           return `
             <div class="user-row ${isBot ? 'bot-row' : ''}" id="user-${safeDomId(p.identity)}">
@@ -3700,7 +3704,7 @@
         const name = p.name || p.identity;
         const isMusic = name.includes('[MUSIC]');
         const isBot = name.includes('[BOT]') || isMusic;
-        const displayName = name.replace('[BOT]', '').replace('[MUSIC]', '').trim();
+        const displayName = cleanChatSender(name.replace('[BOT]', '').replace('[MUSIC]', '').trim());
         const musicSvg = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--reactor-lime); opacity: 0.92;"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`;
         const initial = isMusic ? musicSvg : (isBot ? '🤖' : (displayName[0] || 'У').toUpperCase());
         const badgeLabel = isMusic ? 'ПЛЕЕР' : 'БОТ';
@@ -4594,23 +4598,45 @@
       return `${slug}_${Math.abs(h).toString(36)}`;
     }
 
-    function stripZalgo(str) {
+    const recentChatSendTimes = new Map(); // identity -> timestamp
+    let lastLocalChatSendTime = 0;
+
+    function isChatSpamming(identity) {
+      const now = performance.now();
+      const last = recentChatSendTimes.get(identity) || 0;
+      if (now - last < 900) {
+        return true;
+      }
+      recentChatSendTimes.set(identity, now);
+      return false;
+    }
+
+    function sanitizeChatMessage(str) {
       if (!str) return '';
-      return String(str)
-        // Strip Unicode combining diacritics (Zalgo marks)
+      let s = String(str)
+        // 1. Strip Unicode combining diacritics (Zalgo marks)
         .replace(/[\u0300-\u036F\u0483-\u0489\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE20-\uFE2F]/g, '')
-        // Strip zero-width, invisible, and control characters
+        // 2. Strip zero-width, invisible, and control characters
         .replace(/[\u200B-\u200D\uFEFF\u0000-\u0008\u000E-\u001F]/g, '')
-        // Collapse 3+ newlines to max 2
+        // 3. Collapse repeating identical characters (>8) to prevent wall-of-text flood
+        .replace(/(.)\1{8,}/gu, (match, char) => char.repeat(8) + '... [флуд]')
+        // 4. Collapse multiple newlines to max 2
         .replace(/\n{3,}/g, '\n\n')
         .trim();
+      // 5. Hard clamp to 500 characters
+      return s.slice(0, 500);
     }
+    const stripZalgo = sanitizeChatMessage;
 
     function cleanChatSender(rawSender) {
       if (!rawSender) return 'Участник';
       const noZalgo = stripZalgo(rawSender);
-      const safe = noZalgo.replace(/<[^>]*>/g, '').replace(/[\r\n\t"\'<>{}\\\/`]/g, '').trim();
-      return safe.slice(0, 24) || 'Участник';
+      const safe = noZalgo
+        .replace(/<[^>]*>/g, '')
+        .replace(/[^a-zA-Z0-9а-яА-ЯёЁ _\-\.()\[\]]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return safe.slice(0, 20) || 'Участник';
     }
 
     function appendChatMessage(sender, text, time, isSelf, file) {
@@ -4825,9 +4851,16 @@
 
     chatForm.onsubmit = async (e) => {
       e.preventDefault();
+      const now = performance.now();
+      if (now - lastLocalChatSendTime < 900) {
+        showToast('[ ! ] Не спамьте так часто! Подождите 1 сек.');
+        return;
+      }
+
       const rawText = chatInput.value;
-      const text = stripZalgo(rawText);
+      const text = sanitizeChatMessage(rawText);
       if (!text || !currentRoom) return;
+      lastLocalChatSendTime = now;
 
       const time = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
       const rawSender = currentRoom.localParticipant.name || currentRoom.localParticipant.identity;
